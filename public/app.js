@@ -2,7 +2,6 @@
    Финальная сборка: без блокирующих оверлеев, индикатор связи стартует всегда. */
 'use strict';
 
-// ---------- Конфиг Firebase (твой проект, регион europe-west1) ----------
 const firebaseConfig = {
   apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
   authDomain: "two-players-945a2.firebaseapp.com",
@@ -13,8 +12,6 @@ const firebaseConfig = {
   appId: "1:947219222314:web:c67fff24831d3945d61853"
 };
 
-// Инициализация под защитой: даже если скрипт Firebase не доехал или
-// расширение вмешалось - файл НЕ умрёт на верхней строке.
 const hasFirebase = (typeof firebase !== 'undefined');
 let db = null, SV = null;
 if (hasFirebase) {
@@ -25,7 +22,6 @@ if (hasFirebase) {
   } catch (e) { console.warn('firebase init failed:', e); }
 }
 
-// ---------- WebRTC / качество ----------
 const RTC_CONFIG = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
@@ -42,7 +38,6 @@ const QUALITY = {
   eco:    { bitrate: 2000000,  fps: 30, label: '720p30' }
 };
 
-// ---------- Состояние ----------
 let roomCode = null, isHost = false, myId = null, peerId = null, pc = null;
 let micStream = null, screenStream = null, screenTracks = [];
 let makingOffer = false, statsTimer = null, prevVideo = null;
@@ -50,7 +45,6 @@ let remoteMix = new MediaStream();
 let audioCtx = null, localAnalyser = null, remoteAnalyser = null, metersRAF = null, meterBuf = null;
 let membersRef = null, signalsRef = null, myMemberRef = null;
 
-// ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   netLed: $('netLed'), netStatus: $('netStatus'), pingValue: $('pingValue'),
@@ -75,7 +69,6 @@ const el = {
   toast: $('toast'), remoteAudio: $('remoteAudio'), unsupported: $('unsupported')
 };
 
-// ---------- Утилиты ----------
 function genId() {
   try { return crypto.randomUUID(); }
   catch { return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -125,7 +118,6 @@ function lobbyError(msg) {
   el.lobbyError.style.animation = '';
 }
 
-// ---------- Индикатор связи с Firebase (стартует ВСЕГДА) ----------
 function watchConnection() {
   if (!db) {
     if (el.netLed) el.netLed.className = 'led led--amber';
@@ -144,7 +136,6 @@ function watchConnection() {
   });
 }
 
-// ---------- Сигнальный слой ----------
 function pushSignal(to, type, extra) {
   if (!db || !roomCode || !myId) return;
   db.ref('rooms/' + roomCode + '/signals').push(
@@ -187,7 +178,6 @@ async function writeMember() {
   myMemberRef.onDisconnect().remove();
 }
 
-// ---------- Комнаты ----------
 async function createRoom() {
   if (!db) throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';
   myId = genId(); isHost = true;
@@ -228,7 +218,6 @@ function renderRoomCode(code) {
   }
 }
 
-// ---------- Микрофон (проверка поддержки - только здесь, в момент клика) ----------
 async function ensureMic() {
   if (micStream) return micStream;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -242,7 +231,6 @@ async function ensureMic() {
   return micStream;
 }
 
-// ---------- Обработчики кнопок (навешиваются БЕЗУСЛОВНО при загрузке) ----------
 el.btnCreate.addEventListener('click', async () => {
   try {
     el.btnCreate.disabled = true;
@@ -301,7 +289,6 @@ function enterCall() {
   startStats();
 }
 
-// ---------- WebRTC ----------
 function ensurePC() {
   if (pc) return pc;
   pc = new RTCPeerConnection(RTC_CONFIG);
@@ -405,7 +392,6 @@ function onPeerLeft() {
   }
 }
 
-// ---------- Демонстрация экрана ----------
 el.btnShare.addEventListener('click', async () => {
   if (screenStream) return stopScreenShare(false);
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -464,7 +450,6 @@ function stopScreenShare(silent) {
   if (!silent) toast('Демонстрация остановлена');
 }
 
-// ---------- Качество ----------
 async function applyQuality() {
   if (!pc) return;
   const preset = QUALITY[el.qualitySelect.value] || QUALITY.high;
@@ -483,7 +468,6 @@ el.qualitySelect.addEventListener('change', () => {
   if (p) toast('Качество: ' + p.label);
 });
 
-// ---------- Микрофон и статусы ----------
 el.btnMic.addEventListener('click', () => {
   if (!micStream) return;
   const track = micStream.getAudioTracks()[0];
@@ -538,7 +522,6 @@ function leaveAll() {
   showScreen('lobby');
 }
 
-// ---------- Телеметрия ----------
 function startStats() {
   if (statsTimer) clearInterval(statsTimer);
   prevVideo = null; resetStatsUI();
@@ -602,7 +585,6 @@ function resetStatsUI() {
   [el.barFps, el.barBitrate, el.barRtt, el.barLoss].forEach((b) => { b.style.width = '0%'; b.className = ''; });
 }
 
-// ---------- Индикаторы громкости ----------
 function ensureAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
@@ -639,14 +621,9 @@ function stopMeters() {
   el.meterLocal.style.width = '0%'; el.meterRemote.style.width = '0%';
 }
 
-// ---------- Запуск (НИКАКИХ блокирующих оверлеев) ----------
 (function init() {
-  // Принудительно прячем чёрную заглушку - что бы ни случилось на старте,
-  // интерфейс должен быть виден. Поддержка проверяется лениво, при клике.
   if (el.unsupported) el.unsupported.hidden = true;
-
-  watchConnection();   // индикатор связи стартует всегда
-
+  watchConnection();
   const urlRoom = new URLSearchParams(location.search).get('room');
   if (urlRoom) {
     el.joinCode.value = urlRoom.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
