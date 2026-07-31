@@ -129,12 +129,13 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
 .meter-fill--local{background:linear-gradient(90deg,#1f9d5f,var(--green))}
 .meter-fill--remote{background:linear-gradient(90deg,#2f86b8,var(--cyan))}
 .stat{margin-bottom:13px}.stat:last-child{margin-bottom:0}
-.stat-top{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--muted);margin-bottom:5px}
-.stat-top b{font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--cyan)}
+.stat-top{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);margin-bottom:5px;gap:8px}
+.stat-top b{font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--cyan);display:inline-flex;align-items:center;gap:7px}
 .stat-bar{height:4px;background:var(--bg-deep);overflow:hidden}
 .stat-bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--cyan));transition:width .5s cubic-bezier(.2,.8,.2,1),background .5s}
 .stat-bar i.warn{background:linear-gradient(90deg,var(--amber),#ff8f3d)}
 .stat-bar i.bad{background:linear-gradient(90deg,#ff8f3d,var(--red))}
+.ice-ok{color:var(--green)!important}.ice-warn{color:var(--amber)!important}.ice-bad{color:var(--red)!important}
 .side-card--tips p{font-size:13.5px;color:var(--muted);line-height:1.6}
 .dock{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line-soft);clip-path:var(--cut);padding:14px 20px}
 .dock-btn{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:88px;padding:11px 14px 9px;background:var(--surface-2);border:1px solid var(--line);color:var(--text);cursor:pointer;clip-path:var(--cut-s);transition:transform .16s,border-color .16s,box-shadow .16s,background .16s}
@@ -243,6 +244,8 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
         </div>
         <div class="side-card side-card--stats">
           <h3 class="side-title">Телеметрия канала</h3>
+          <div class="stat"><div class="stat-top"><span>Прямой канал (ICE)</span><b id="statIce"><span class="led" id="iceLed"></span><span id="iceText">ожидание</span></b></div></div>
+          <div class="stat"><div class="stat-top"><span>Сигналы принято / отправлено</span><b id="statSig">0 / 0</b></div></div>
           <div class="stat"><div class="stat-top"><span>Разрешение</span><b id="statRes">—</b></div></div>
           <div class="stat"><div class="stat-top"><span>FPS</span><b id="statFps">—</b></div><div class="stat-bar"><i id="barFps"></i></div></div>
           <div class="stat"><div class="stat-top"><span>Битрейт</span><b id="statBitrate">—</b></div><div class="stat-bar"><i id="barBitrate"></i></div></div>
@@ -280,8 +283,8 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 'use strict';
-/* ВТОРОЙ ИГРОК — монолит v2: всё встроено, без внешних app.js/style.css. */
-console.log('[ВТОРОЙ ИГРОК] сборка: монолит v2');
+/* ВТОРОЙ ИГРОК — монолит v3: пульс-присутствие + on-screen диагностика ICE/сигналов. */
+console.log('[ВТОРОЙ ИГРОК] сборка: монолит v3');
 
 const firebaseConfig = {
   apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
@@ -294,30 +297,24 @@ const firebaseConfig = {
 };
 const hasFirebase = (typeof firebase !== 'undefined');
 let db = null, SV = null;
-if (hasFirebase) {
-  try { firebase.initializeApp(firebaseConfig); db = firebase.database(); SV = firebase.database.ServerValue.TIMESTAMP; }
-  catch (e) { console.warn('firebase init failed:', e); }
-}
+if (hasFirebase) { try { firebase.initializeApp(firebaseConfig); db = firebase.database(); SV = firebase.database.ServerValue.TIMESTAMP; } catch (e) { console.warn('firebase init failed:', e); } }
 
 const RTC_CONFIG = {
   iceServers: [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-    { urls: ['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],
-      username: 'openrelayproject', credential: 'openrelayproject' }
+    { urls: ['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:stun2.l.google.com:19302'] },
+    { urls: ['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'], username:'openrelayproject', credential:'openrelayproject' }
   ],
   iceCandidatePoolSize: 10
 };
-const QUALITY = {
-  max:{bitrate:12000000,fps:60,label:'1080p60 макс'}, high:{bitrate:8000000,fps:60,label:'1080p60'},
-  medium:{bitrate:4000000,fps:45,label:'720p45'}, eco:{bitrate:2000000,fps:30,label:'720p30'}
-};
+const QUALITY = { max:{bitrate:12000000,fps:60,label:'1080p60 макс'}, high:{bitrate:8000000,fps:60,label:'1080p60'}, medium:{bitrate:4000000,fps:45,label:'720p45'}, eco:{bitrate:2000000,fps:30,label:'720p30'} };
 
 let roomCode=null,isHost=false,myId=null,peerId=null,pc=null;
 let micStream=null,screenStream=null,screenTracks=[];
-let makingOffer=false,statsTimer=null,prevVideo=null;
+let makingOffer=false,statsTimer=null,prevVideo=null,heartbeatTimer=null;
 let remoteMix=new MediaStream();
 let audioCtx=null,localAnalyser=null,remoteAnalyser=null,metersRAF=null,meterBuf=null;
-let membersRef=null,signalsRef=null,myMemberRef=null;
+let membersRef=null,signalsRef=null,myMemberRef=null,connRef=null;
+let sigIn=0,sigOut=0,peerOfflineTimer=null,peerGone=false;
 
 const $=(id)=>document.getElementById(id);
 const el={
@@ -327,9 +324,10 @@ const el={
   waitText:$('waitText'),btnCancelWait:$('btnCancelWait'),callScreen:$('callScreen'),
   remoteVideo:$('remoteVideo'),stageEmpty:$('stageEmpty'),stageEmptyText:$('stageEmptyText'),stageBadge:$('stageBadge'),
   localVideo:$('localVideo'),eventBanner:$('eventBanner'),peerLed:$('peerLed'),peerName:$('peerName'),
-  meterRemote:$('meterRemote'),meterLocal:$('meterLocal'),statRes:$('statRes'),statFps:$('statFps'),barFps:$('barFps'),
-  statBitrate:$('statBitrate'),barBitrate:$('barBitrate'),statRtt:$('statRtt'),barRtt:$('barRtt'),
-  statJitter:$('statJitter'),statLoss:$('statLoss'),barLoss:$('barLoss'),
+  meterRemote:$('meterRemote'),meterLocal:$('meterLocal'),
+  iceLed:$('iceLed'),iceText:$('iceText'),statSig:$('statSig'),
+  statRes:$('statRes'),statFps:$('statFps'),barFps:$('barFps'),statBitrate:$('statBitrate'),barBitrate:$('barBitrate'),
+  statRtt:$('statRtt'),barRtt:$('barRtt'),statJitter:$('statJitter'),statLoss:$('statLoss'),barLoss:$('barLoss'),
   btnMic:$('btnMic'),icoMic:$('icoMic'),capMic:$('capMic'),btnShare:$('btnShare'),capShare:$('capShare'),qualitySelect:$('qualitySelect'),
   btnCopyCallLink:$('btnCopyCallLink'),btnLeave:$('btnLeave'),toast:$('toast'),remoteAudio:$('remoteAudio'),unsupported:$('unsupported')
 };
@@ -345,23 +343,91 @@ async function copyText(t,ok){try{await navigator.clipboard.writeText(t);}catch{
 function roomLink(){return location.origin+location.pathname+'?room='+roomCode;}
 function lobbyError(m){if(!el.lobbyError)return;el.lobbyError.textContent=m;el.lobbyError.hidden=false;el.lobbyError.style.animation='none';void el.lobbyError.offsetWidth;el.lobbyError.style.animation='';}
 
+// ---------- on-screen диагностика ----------
+function setSig(){el.statSig.textContent=sigIn+' / '+sigOut;}
+function setIce(state){
+  const map={ 'new':['ожидание','led--amber'], 'checking':['сборка канала…','led--amber'],
+    'connected':['соединён','led--green'], 'completed':['соединён','led--green'],
+    'disconnected':['обрыв, возврат…','led--amber'], 'failed':['нет канала','led--red'], 'closed':['закрыт','led--red'] };
+  const m=map[state]||[state||'—','led--amber'];
+  el.iceText.textContent=m[0]; el.iceLed.className='led '+m[1];
+  el.iceText.parentElement.className = state==='connected'||state==='completed' ? 'ice-ok' : (state==='failed'||state==='closed' ? 'ice-bad' : 'ice-warn');
+}
+
+// ---------- связь с Firebase + пульс присутствия ----------
 function watchConnection(){
-  if(!db){if(el.netLed)el.netLed.className='led led--amber';if(el.netStatus)el.netStatus.textContent='без базы';return;}
-  db.ref('.info/connected').on('value',(s)=>{
-    if(s.val()===true){el.netLed.className='led led--green';el.netStatus.textContent='на связи';}
-    else{el.netLed.className='led led--red';el.netStatus.textContent='нет связи';el.pingValue.textContent='—';}
+  if(!db){el.netLed.className='led led--amber';el.netStatus.textContent='без базы';return;}
+  connRef=db.ref('.info/connected');
+  connRef.on('value',(s)=>{
+    if(s.val()===true){
+      el.netLed.className='led led--green';el.netStatus.textContent='на связи';
+      if(myMemberRef){ myMemberRef.update({online:true,ts:SV}); }   // переподключился - восстановил присутствие
+    } else {
+      el.netLed.className='led led--red';el.netStatus.textContent='нет связи';el.pingValue.textContent='—';
+    }
   });
 }
-function pushSignal(to,type,extra){if(!db||!roomCode||!myId)return;db.ref('rooms/'+roomCode+'/signals').push(Object.assign({from:myId,to:to,type:type,ts:SV},extra||{}));}
-function subscribeSignals(){if(!db)return;signalsRef=db.ref('rooms/'+roomCode+'/signals');signalsRef.on('child_added',(snap)=>{const sig=snap.val();if(!sig){snap.ref.remove();return;}if(sig.from===myId){snap.ref.remove();return;}if(sig.to!==myId&&sig.to!=='*')return;if(sig.type==='offer'||sig.type==='answer'||sig.type==='candidate')handleSignal(sig.from,sig);snap.ref.remove();});}
-function subscribeMembers(){if(!db)return;membersRef=db.ref('rooms/'+roomCode+'/members');membersRef.on('child_added',(snap)=>{if(snap.key===myId)return;if(!peerId)peerId=snap.key;if(isHost)onPeerArrived();});membersRef.on('child_changed',(snap)=>{if(snap.key===peerId)applyPeerState(snap.val());});membersRef.on('child_removed',(snap)=>{if(snap.key===peerId)onPeerLeft();});}
-async function writeMember(){if(!db)return;myMemberRef=db.ref('rooms/'+roomCode+'/members/'+myId);await myMemberRef.set({mic:true,sharing:false,ts:SV});myMemberRef.onDisconnect().remove();}
+function startHeartbeat(){
+  stopHeartbeat();
+  heartbeatTimer=setInterval(()=>{ if(myMemberRef) myMemberRef.update({online:true,ts:SV}); }, 8000);
+}
+function stopHeartbeat(){ if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null;} }
+
+function pushSignal(to,type,extra){
+  if(!db||!roomCode||!myId)return;
+  sigOut++; setSig();
+  db.ref('rooms/'+roomCode+'/signals').push(Object.assign({from:myId,to:to,type:type,ts:SV},extra||{}));
+}
+function subscribeSignals(){
+  if(!db)return;
+  signalsRef=db.ref('rooms/'+roomCode+'/signals');
+  signalsRef.on('child_added',(snap)=>{
+    const sig=snap.val();
+    if(!sig){snap.ref.remove();return;}
+    if(sig.from===myId){snap.ref.remove();return;}
+    if(sig.to!==myId&&sig.to!=='*'){snap.ref.remove();return;}   // чужое - удаляем чисто
+    sigIn++; setSig();
+    if(sig.type==='offer'||sig.type==='answer'||sig.type==='candidate') handleSignal(sig.from,sig);
+    else if(sig.type==='restart'){ if(pc){pc.restartIce(); banner('Канал пересобирается…','warn');} }
+    snap.ref.remove();
+  });
+}
+function subscribeMembers(){
+  if(!db)return;
+  membersRef=db.ref('rooms/'+roomCode+'/members');
+  membersRef.on('child_added',(snap)=>{
+    if(snap.key===myId)return;
+    if(peerGone)return;
+    if(!peerId)peerId=snap.key;
+    if(isHost) onPeerArrived();
+    else { applyPeerState(snap.val()); markPeerOnline(); }
+  });
+  membersRef.on('child_changed',(snap)=>{
+    if(snap.key!==peerId)return;
+    const v=snap.val()||{};
+    applyPeerState(v);
+    if(v.online===false) schedulePeerOffline(); else markPeerOnline();
+  });
+  membersRef.on('child_removed',(snap)=>{ if(snap.key===peerId) onPeerLeft(); });   // явный выход
+}
+function markPeerOnline(){ if(peerOfflineTimer){clearTimeout(peerOfflineTimer);peerOfflineTimer=null;} }
+function schedulePeerOffline(){
+  markPeerOnline();
+  peerOfflineTimer=setTimeout(()=>{ if(!peerGone) onPeerLeft(); }, 22000);   // моргнул - ждём 22с пульса
+}
+async function writeMember(){
+  if(!db)return;
+  myMemberRef=db.ref('rooms/'+roomCode+'/members/'+myId);
+  await myMemberRef.set({mic:true,sharing:false,online:true,ts:SV});
+  myMemberRef.onDisconnect().update({online:false,ts:SV});   // НЕ удаляем - только метка, чтобы не выкидывать при моргании
+  startHeartbeat();
+}
 
 async function createRoom(){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';myId=genId();isHost=true;let code=genCode();for(let i=0;i<12;i++){const s=await db.ref('rooms/'+code).get();if(!s.exists())break;code=genCode();}roomCode=code;renderRoomCode(code);showScreen('wait');await writeMember();subscribeMembers();subscribeSignals();}
-async function joinRoom(code){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';const rs=await db.ref('rooms/'+code).get();if(!rs.exists())throw 'Комната не найдена. Проверь код.';const ms=await db.ref('rooms/'+code+'/members').get();if(ms.exists()&&Object.keys(ms.val()||{}).length>=2)throw 'В комнате уже два человека.';myId=genId();isHost=false;roomCode=code;await writeMember();subscribeMembers();subscribeSignals();enterCall();banner('Ты в комнате. Соединяемся...','good');sendState();}
+async function joinRoom(code){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';const rs=await db.ref('rooms/'+code).get();if(!rs.exists())throw 'Комната не найдена. Проверь код.';const ms=await db.ref('rooms/'+code+'/members').get();if(ms.exists()&&Object.keys(ms.val()||{}).length>=2)throw 'В комнате уже два человека.';myId=genId();isHost=false;roomCode=code;await writeMember();subscribeMembers();subscribeSignals();enterCall();banner('Ты в комнате. Соединяемся…','good');sendState();}
 function renderRoomCode(code){el.roomCodeDisplay.innerHTML='';for(const ch of code){const s=document.createElement('span');s.textContent=ch;el.roomCodeDisplay.appendChild(s);}}
 
-async function ensureMic(){if(micStream)return micStream;if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){throw new Error('NO_MEDIA');}micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});startLocalMeter(micStream);return micStream;}
+async function ensureMic(){if(micStream)return micStream;if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('NO_MEDIA');micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});startLocalMeter(micStream);return micStream;}
 
 el.btnCreate.addEventListener('click',async()=>{try{el.btnCreate.disabled=true;el.lobbyError.hidden=true;await ensureMic();await createRoom();}catch(err){el.btnCreate.disabled=false;if(err&&err.name==='NotAllowedError')lobbyError('Ты запретил микрофон. Разреши его в браузере и нажми «Создать» снова.');else if(err&&err.message==='NO_MEDIA')lobbyError('Этот браузер не даёт доступ к микрофону. Открой сайт в Chrome, Edge или Safari.');else if(typeof err==='string')lobbyError(err);else lobbyError('Не удалось создать комнату. Обнови страницу (Ctrl+Shift+R) и попробуй снова.');}});
 el.btnJoin.addEventListener('click',joinByCode);
@@ -372,12 +438,60 @@ el.btnCopyLink.addEventListener('click',()=>copyText(roomLink(),'Ссылка с
 el.btnCopyCode.addEventListener('click',()=>copyText(roomCode,'Код комнаты скопирован'));
 el.btnCancelWait.addEventListener('click',leaveAll);
 
-function enterCall(){showScreen('call');el.stageEmpty.hidden=false;el.stageEmptyText.textContent=isHost?'Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.':'Ты подключился. Как только друг включит демонстрацию - его экран появится здесь.';el.peerLed.className='led led--green';startStats();}
+function enterCall(){showScreen('call');el.stageEmpty.hidden=false;el.stageEmptyText.textContent=isHost?'Напарник на связи. Нажми «Демонстрацию», чтобы показать свой экран.':'Ты подключился. Как только друг включит демонстрацию - его экран появится здесь.';el.peerLed.className='led led--green';sigIn=0;sigOut=0;setSig();setIce('new');startStats();}
 
-function ensurePC(){if(pc)return pc;pc=new RTCPeerConnection(RTC_CONFIG);if(micStream)micStream.getAudioTracks().forEach((t)=>pc.addTrack(t,micStream));if(screenStream){const v=screenStream.getVideoTracks()[0];if(v)pc.addTrack(v,screenStream);const a=screenStream.getAudioTracks()[0];if(a)pc.addTrack(a,screenStream);}pc.onicecandidate=(e)=>{if(e.candidate&&peerId)pushSignal(peerId,'candidate',{candidate:e.candidate});};pc.ontrack=(e)=>{remoteMix.addTrack(e.track);if(e.track.kind==='video'){el.remoteVideo.srcObject=remoteMix;el.remoteVideo.muted=true;el.remoteVideo.play().catch(()=>{});el.stageEmpty.hidden=true;}else{el.remoteAudio.srcObject=remoteMix;el.remoteAudio.play().catch(()=>{});startRemoteMeter(remoteMix);}e.track.onended=()=>{remoteMix.removeTrack(e.track);if(e.track.kind==='video'){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник остановил демонстрацию.';}};};pc.onconnectionstatechange=()=>{if(!pc)return;const s=pc.connectionState;if(s==='connected'){el.peerLed.className='led led--green';banner('Прямое соединение установлено','good');applyQuality();}else if(s==='disconnected'){el.peerLed.className='led led--amber';}else if(s==='failed'){el.peerLed.className='led led--red';banner('Связь прервалась - переподключаемся...','warn');pc.restartIce();}};pc.onnegotiationneeded=async()=>{if(!peerId)return;try{makingOffer=true;await pc.setLocalDescription(await pc.createOffer());pushSignal(peerId,'offer',{sdp:pc.localDescription});}catch(err){console.warn('offer error',err);}finally{makingOffer=false;}};return pc;}
-async function handleSignal(fromId,msg){if(!peerId)peerId=fromId;if(!pc)ensurePC();try{if(msg.type==='offer'){const col=makingOffer||pc.signalingState!=='stable';if(col&&isHost)return;await pc.setRemoteDescription(msg.sdp);await pc.setLocalDescription(await pc.createAnswer());pushSignal(fromId,'answer',{sdp:pc.localDescription});}else if(msg.type==='answer'){await pc.setRemoteDescription(msg.sdp);}else if(msg.type==='candidate'){try{await pc.addIceCandidate(msg.candidate);}catch{}}}catch(err){console.warn('signal error',err);}}
+function ensurePC(){
+  if(pc)return pc;
+  pc=new RTCPeerConnection(RTC_CONFIG);
+  if(micStream)micStream.getAudioTracks().forEach((t)=>pc.addTrack(t,micStream));
+  if(screenStream){const v=screenStream.getVideoTracks()[0];if(v)pc.addTrack(v,screenStream);const a=screenStream.getAudioTracks()[0];if(a)pc.addTrack(a,screenStream);}
+  pc.onicecandidate=(e)=>{ if(e.candidate&&peerId) pushSignal(peerId,'candidate',{candidate:e.candidate}); };
+  pc.ontrack=(e)=>{
+    remoteMix.addTrack(e.track);
+    if(e.track.kind==='video'){el.remoteVideo.srcObject=remoteMix;el.remoteVideo.muted=true;el.remoteVideo.play().catch(()=>{});el.stageEmpty.hidden=true;}
+    else{el.remoteAudio.srcObject=remoteMix;el.remoteAudio.play().catch(()=>{});startRemoteMeter(remoteMix);}
+    e.track.onended=()=>{remoteMix.removeTrack(e.track);if(e.track.kind==='video'){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник остановил демонстрацию.';}};
+  };
+  pc.oniceconnectionstatechange=()=>{ if(pc){ setIce(pc.iceConnectionState); if(pc.iceConnectionState==='connected'||pc.iceConnectionState==='completed') banner('Прямой канал установлен — голос и экран идут','good'); } };
+  pc.onconnectionstatechange=()=>{
+    if(!pc)return;const s=pc.connectionState;
+    if(s==='connected'){el.peerLed.className='led led--green';applyQuality();}
+    else if(s==='disconnected'){el.peerLed.className='led led--amber';}
+    else if(s==='failed'){el.peerLed.className='led led--red';banner('Канал упал — пересобираем…','warn');try{pc.restartIce();}catch{} if(peerId)pushSignal(peerId,'restart',{});}
+  };
+  pc.onnegotiationneeded=async()=>{
+    if(!peerId)return;
+    try{makingOffer=true;await pc.setLocalDescription(await pc.createOffer());pushSignal(peerId,'offer',{sdp:pc.localDescription});banner('→ offer отправлен','good');}
+    catch(err){console.warn('offer error',err);}finally{makingOffer=false;}
+  };
+  return pc;
+}
+async function handleSignal(fromId,msg){
+  if(!peerId)peerId=fromId;
+  if(!pc)ensurePC();
+  try{
+    if(msg.type==='offer'){
+      const col=makingOffer||pc.signalingState!=='stable';
+      if(col&&isHost)return;
+      await pc.setRemoteDescription(msg.sdp);banner('← offer принят','good');
+      await pc.setLocalDescription(await pc.createAnswer());pushSignal(fromId,'answer',{sdp:pc.localDescription});banner('→ answer отправлен','good');
+    } else if(msg.type==='answer'){
+      await pc.setRemoteDescription(msg.sdp);banner('← answer принят','good');
+    } else if(msg.type==='candidate'){
+      try{await pc.addIceCandidate(msg.candidate);}catch{}
+    }
+  }catch(err){console.warn('signal error',err);}
+}
 function onPeerArrived(){enterCall();ensurePC();banner('Напарник подключился','good');sendState();}
-function onPeerLeft(){peerId=null;if(pc){pc.close();pc=null;}remoteMix.getTracks().forEach((t)=>remoteMix.removeTrack(t));el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.peerLed.className='led led--red';el.meterRemote.style.width='0%';if(isHost){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник вышел. Комната жива - ждём его возвращения...';banner('Напарник отключился. Он может зайти по тому же коду.','warn');}else{banner('Хост закрыл комнату','warn');setTimeout(()=>{leaveAll();lobbyError('Хост закрыл комнату. Пусть создаст новую и пришлёт код.');},2200);}}
+function onPeerLeft(){
+  if(peerGone)return;peerGone=true;markPeerOnline();
+  peerId=null;if(pc){pc.close();pc=null;}
+  remoteMix.getTracks().forEach((t)=>remoteMix.removeTrack(t));
+  el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;
+  el.peerLed.className='led led--red';el.meterRemote.style.width='0%';setIce('closed');
+  if(isHost){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник вышел. Комната жива - ждём его возвращения…';banner('Напарник отключился. Он может зайти по тому же коду.','warn');peerGone=false;}
+  else{banner('Хост закрыл комнату','warn');setTimeout(()=>{leaveAll();lobbyError('Хост закрыл комнату. Пусть создаст новую и пришлёт код.');},2200);}
+}
 
 el.btnShare.addEventListener('click',async()=>{if(screenStream)return stopScreenShare(false);if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia)return toast('Демонстрация экрана недоступна в этом браузере. Открой сайт в Chrome или Edge.');try{el.btnShare.disabled=true;screenStream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor',frameRate:{ideal:60,max:60},width:{ideal:1920},height:{ideal:1080}},audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,sampleRate:48000},systemAudio:'include',selfBrowserSurface:'exclude',preferCurrentTab:false});el.btnShare.disabled=false;const vTrack=screenStream.getVideoTracks()[0];vTrack.contentHint='detail';vTrack.addEventListener('ended',()=>stopScreenShare(true));screenTracks=screenStream.getTracks();el.localVideo.srcObject=screenStream;el.localVideo.hidden=false;if(pc){pc.addTrack(vTrack,screenStream);const aTrack=screenStream.getAudioTracks()[0];if(aTrack)pc.addTrack(aTrack,screenStream);}el.btnShare.classList.add('is-live');el.capShare.textContent='в эфире';el.stageBadge.hidden=false;applyQuality();sendState();toast(screenStream.getAudioTracks().length?'Экран в эфире - вместе со звуком игры':'Экран в эфире (без системного звука - отметь галочку в окне захвата)');}catch(err){el.btnShare.disabled=false;screenStream=null;if(err&&err.name!=='NotAllowedError')toast('Не удалось начать демонстрацию');}});
 function stopScreenShare(silent){if(screenStream){screenStream.getTracks().forEach((t)=>t.stop());screenStream=null;}if(pc&&screenTracks.length){pc.getSenders().forEach((s)=>{if(s.track&&screenTracks.includes(s.track))pc.removeTrack(s);});}screenTracks=[];el.localVideo.srcObject=null;el.localVideo.hidden=true;el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';el.stageBadge.hidden=true;sendState();if(!silent)toast('Демонстрация остановлена');}
@@ -386,20 +500,36 @@ async function applyQuality(){if(!pc)return;const p=QUALITY[el.qualitySelect.val
 el.qualitySelect.addEventListener('change',()=>{applyQuality();const p=QUALITY[el.qualitySelect.value];if(p)toast('Качество: '+p.label);});
 
 el.btnMic.addEventListener('click',()=>{if(!micStream)return;const t=micStream.getAudioTracks()[0];if(!t)return;t.enabled=!t.enabled;el.btnMic.classList.toggle('is-muted',!t.enabled);el.icoMic.textContent=t.enabled?'🎙':'';el.capMic.textContent=t.enabled?'микрофон':'выкл';sendState();});
-function sendState(){if(!myMemberRef)return;const t=micStream?micStream.getAudioTracks()[0]:null;myMemberRef.update({mic:t?t.enabled:true,sharing:!!screenStream});}
+function sendState(){if(!myMemberRef)return;const t=micStream?micStream.getAudioTracks()[0]:null;myMemberRef.update({mic:t?t.enabled:true,sharing:!!screenStream,online:true,ts:SV});}
 function applyPeerState(st){el.peerName.textContent=(st&&st.mic===false)?'Напарник (микрофон выкл)':'Напарник';}
 
 el.btnCopyCallLink.addEventListener('click',()=>copyText(roomLink(),'Ссылка на комнату скопирована'));
 el.btnLeave.addEventListener('click',leaveAll);
-window.addEventListener('beforeunload',()=>{try{if(myMemberRef)myMemberRef.remove();}catch{}if(pc)pc.close();});
+window.addEventListener('beforeunload',()=>{stopHeartbeat();try{if(myMemberRef)myMemberRef.remove();}catch{}if(pc)pc.close();});
 
-function leaveAll(){stopScreenShare(true);if(micStream){micStream.getTracks().forEach((t)=>t.stop());micStream=null;}if(pc){pc.close();pc=null;}if(statsTimer){clearInterval(statsTimer);statsTimer=null;}stopMeters();try{if(membersRef)membersRef.off();}catch{}try{if(signalsRef)signalsRef.off();}catch{}try{if(myMemberRef){myMemberRef.remove();myMemberRef=null;}}catch{}try{if(isHost&&roomCode&&db)db.ref('rooms/'+roomCode).remove();}catch{}membersRef=null;signalsRef=null;remoteMix=new MediaStream();el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.localVideo.srcObject=null;el.localVideo.hidden=true;el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';el.btnMic.classList.remove('is-muted');el.icoMic.textContent='🎙';el.capMic.textContent='микрофон';el.stageBadge.hidden=true;el.eventBanner.hidden=true;resetStatsUI();roomCode=null;peerId=null;isHost=false;myId=null;prevVideo=null;showScreen('lobby');}
+function leaveAll(){
+  stopScreenShare(true);stopHeartbeat();
+  if(micStream){micStream.getTracks().forEach((t)=>t.stop());micStream=null;}
+  if(pc){pc.close();pc=null;}
+  if(statsTimer){clearInterval(statsTimer);statsTimer=null;}
+  stopMeters();markPeerOnline();
+  try{if(membersRef)membersRef.off();}catch{}try{if(signalsRef)signalsRef.off();}catch{}try{if(connRef)connRef.off();}catch{}
+  try{if(myMemberRef){myMemberRef.remove();myMemberRef=null;}}catch{}
+  try{if(isHost&&roomCode&&db)db.ref('rooms/'+roomCode).remove();}catch{}
+  membersRef=null;signalsRef=null;connRef=null;remoteMix=new MediaStream();
+  el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.localVideo.srcObject=null;el.localVideo.hidden=true;
+  el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';
+  el.btnMic.classList.remove('is-muted');el.icoMic.textContent='🎙';el.capMic.textContent='микрофон';
+  el.stageBadge.hidden=true;el.eventBanner.hidden=true;resetStatsUI();
+  roomCode=null;peerId=null;isHost=false;myId=null;prevVideo=null;peerGone=false;sigIn=0;sigOut=0;
+  showScreen('lobby');
+}
 
 function startStats(){if(statsTimer)clearInterval(statsTimer);prevVideo=null;resetStatsUI();statsTimer=setInterval(collectStats,1000);}
 async function collectStats(){if(!pc)return;let video=null,remote=null;try{const rep=await pc.getStats();rep.forEach((r)=>{if(r.type==='outbound-rtp'&&r.kind==='video'&&!r.isRemote){if(!video||r.bytesSent>video.bytesSent)video=r;}if(r.type==='remote-inbound-rtp'&&r.kind==='video')remote=r;});}catch{return;}if(video){const now=performance.now();if(prevVideo&&now>prevVideo.t){const dt=(now-prevVideo.t)/1000;const bps=((video.bytesSent-prevVideo.bytes)*8)/dt;el.statBitrate.textContent=fmtBitrate(bps);setBar(el.barBitrate,(bps/12000000)*100);}prevVideo={t:now,bytes:video.bytesSent};if(video.frameWidth&&video.frameHeight)el.statRes.textContent=video.frameWidth+'x'+video.frameHeight;const fps=video.framesPerSecond||0;el.statFps.textContent=fps?String(Math.round(fps)):'—';setBar(el.barFps,(fps/60)*100,fps>0&&fps<24,fps>0&&fps<12);}if(remote){if(remote.roundTripTime!=null){const ms=Math.round(remote.roundTripTime*1000);el.statRtt.textContent=ms+' мс';el.pingValue.textContent=ms+' мс';setBar(el.barRtt,(ms/300)*100,ms>80,ms>150);}if(remote.jitter!=null)el.statJitter.textContent=(remote.jitter*1000).toFixed(1)+' мс';if(remote.packetsLost!=null&&video&&video.packetsSent>0){const pct=(remote.packetsLost/video.packetsSent)*100;el.statLoss.textContent=pct===0?'0 %':pct.toFixed(2)+' %';setBar(el.barLoss,Math.min(100,pct*20),pct>0.3,pct>1);}}}
 function setBar(b,p,w,bad){b.style.width=Math.max(2,Math.min(100,p))+'%';b.className=bad?'bad':(w?'warn':'');}
 function fmtBitrate(b){if(b>=1000000)return(b/1000000).toFixed(1)+' Мбит/с';return Math.round(b/1000)+' Кбит/с';}
-function resetStatsUI(){el.statRes.textContent='—';el.statFps.textContent='—';el.statBitrate.textContent='—';el.statRtt.textContent='—';el.statJitter.textContent='—';el.statLoss.textContent='—';el.pingValue.textContent='—';[el.barFps,el.barBitrate,el.barRtt,el.barLoss].forEach((b)=>{b.style.width='0%';b.className='';});}
+function resetStatsUI(){el.statRes.textContent='—';el.statFps.textContent='—';el.statBitrate.textContent='—';el.statRtt.textContent='—';el.statJitter.textContent='—';el.statLoss.textContent='—';el.pingValue.textContent='—';el.statSig.textContent='0 / 0';setIce('new');[el.barFps,el.barBitrate,el.barRtt,el.barLoss].forEach((b)=>{b.style.width='0%';b.className='';});}
 
 function ensureAudioCtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});return audioCtx;}
 function makeAnalyser(st){const ctx=ensureAudioCtx();const src=ctx.createMediaStreamSource(st);const an=ctx.createAnalyser();an.fftSize=512;src.connect(an);return an;}
@@ -410,7 +540,7 @@ function runMeters(){if(metersRAF)return;const loop=()=>{el.meterLocal.style.wid
 function stopMeters(){if(metersRAF)cancelAnimationFrame(metersRAF);metersRAF=null;localAnalyser=null;remoteAnalyser=null;el.meterLocal.style.width='0%';el.meterRemote.style.width='0%';}
 
 (function init(){
-  if(el.unsupported)el.unsupported.style.display='none';   // оверлей ВЫКЛЮЧЕН навсегда
+  if(el.unsupported)el.unsupported.style.display='none';
   watchConnection();
   const urlRoom=new URLSearchParams(location.search).get('room');
   if(urlRoom){el.joinCode.value=urlRoom.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);if(el.joinCode.value.length===4)toast('Код подставлен из ссылки - нажми «Войти»');}
