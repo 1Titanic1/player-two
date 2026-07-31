@@ -136,6 +136,8 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
 .stat-bar i.warn{background:linear-gradient(90deg,var(--amber),#ff8f3d)}
 .stat-bar i.bad{background:linear-gradient(90deg,#ff8f3d,var(--red))}
 .ice-ok{color:var(--green)!important}.ice-warn{color:var(--amber)!important}.ice-bad{color:var(--red)!important}
+.bump{animation:bump .4s cubic-bezier(.2,.9,.3,1.4)}
+@keyframes bump{0%{transform:scale(1)}30%{transform:scale(1.2);color:var(--amber-hot)}100%{transform:scale(1)}}
 .side-card--tips p{font-size:13.5px;color:var(--muted);line-height:1.6}
 .dock{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line-soft);clip-path:var(--cut);padding:14px 20px}
 .dock-btn{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:88px;padding:11px 14px 9px;background:var(--surface-2);border:1px solid var(--line);color:var(--text);cursor:pointer;clip-path:var(--cut-s);transition:transform .16s,border-color .16s,box-shadow .16s,background .16s}
@@ -231,7 +233,7 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
     <div class="call-layout">
       <div class="stage">
         <video id="remoteVideo" autoplay playsinline></video>
-        <div class="stage-empty" id="stageEmpty"><span class="stage-empty-ico">📡</span><p id="stageEmptyText">Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.</p></div>
+        <div class="stage-empty" id="stageEmpty"><span class="stage-empty-ico">📡</span><p id="stageEmptyText">Напарник на связи. Нажми «Демонстрацию», чтобы показать свой экран.</p></div>
         <div class="stage-badge" id="stageBadge" hidden><span class="led led--green"></span> ЭКРАН В ЭФИРЕ</div>
         <video id="localVideo" class="pip" autoplay playsinline muted hidden></video>
         <div class="event-banner" id="eventBanner" hidden></div>
@@ -283,8 +285,8 @@ main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margi
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
 'use strict';
-/* ВТОРОЙ ИГРОК — монолит v3: пульс-присутствие + on-screen диагностика ICE/сигналов. */
-console.log('[ВТОРОЙ ИГРОК] сборка: монолит v3');
+/* ВТОРОЙ ИГРОК — монолит v4: ФИКСА сериализации ICE-кандидатов (toJSON) + offer/answer в чистом виде. */
+console.log('[ВТОРОЙ ИГРОК] сборка: монолит v4');
 
 const firebaseConfig = {
   apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
@@ -315,6 +317,7 @@ let remoteMix=new MediaStream();
 let audioCtx=null,localAnalyser=null,remoteAnalyser=null,metersRAF=null,meterBuf=null;
 let membersRef=null,signalsRef=null,myMemberRef=null,connRef=null;
 let sigIn=0,sigOut=0,peerOfflineTimer=null,peerGone=false;
+let pendingCandidates=[];   // кандидаты, пришедшие ДО remote description
 
 const $=(id)=>document.getElementById(id);
 const el={
@@ -342,9 +345,9 @@ function banner(m,k){if(!el.eventBanner)return;el.eventBanner.textContent=m;el.e
 async function copyText(t,ok){try{await navigator.clipboard.writeText(t);}catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}toast(ok);}
 function roomLink(){return location.origin+location.pathname+'?room='+roomCode;}
 function lobbyError(m){if(!el.lobbyError)return;el.lobbyError.textContent=m;el.lobbyError.hidden=false;el.lobbyError.style.animation='none';void el.lobbyError.offsetWidth;el.lobbyError.style.animation='';}
+function bump(node){if(!node)return;node.classList.remove('bump');void node.offsetWidth;node.classList.add('bump');}
 
-// ---------- on-screen диагностика ----------
-function setSig(){el.statSig.textContent=sigIn+' / '+sigOut;}
+function setSig(){el.statSig.textContent=sigIn+' / '+sigOut;bump(el.statSig);}
 function setIce(state){
   const map={ 'new':['ожидание','led--amber'], 'checking':['сборка канала…','led--amber'],
     'connected':['соединён','led--green'], 'completed':['соединён','led--green'],
@@ -352,32 +355,25 @@ function setIce(state){
   const m=map[state]||[state||'—','led--amber'];
   el.iceText.textContent=m[0]; el.iceLed.className='led '+m[1];
   el.iceText.parentElement.className = state==='connected'||state==='completed' ? 'ice-ok' : (state==='failed'||state==='closed' ? 'ice-bad' : 'ice-warn');
+  bump(el.iceText);
 }
 
-// ---------- связь с Firebase + пульс присутствия ----------
+// ---------- чистая сериализация (главная фикса v4) ----------
+function cleanCandidate(c){ if(!c) return null; if(typeof c.toJSON==='function') return c.toJSON(); return {candidate:c.candidate, sdpMid:c.sdpMid, sdpMLineIndex:c.sdpMLineIndex, usernameFragment:c.usernameFragment}; }
+function cleanDesc(d){ if(!d) return null; return {type:d.type, sdp:d.sdp}; }
+
 function watchConnection(){
   if(!db){el.netLed.className='led led--amber';el.netStatus.textContent='без базы';return;}
   connRef=db.ref('.info/connected');
   connRef.on('value',(s)=>{
-    if(s.val()===true){
-      el.netLed.className='led led--green';el.netStatus.textContent='на связи';
-      if(myMemberRef){ myMemberRef.update({online:true,ts:SV}); }   // переподключился - восстановил присутствие
-    } else {
-      el.netLed.className='led led--red';el.netStatus.textContent='нет связи';el.pingValue.textContent='—';
-    }
+    if(s.val()===true){ el.netLed.className='led led--green';el.netStatus.textContent='на связи'; if(myMemberRef)myMemberRef.update({online:true,ts:SV}); }
+    else { el.netLed.className='led led--red';el.netStatus.textContent='нет связи';el.pingValue.textContent='—'; }
   });
 }
-function startHeartbeat(){
-  stopHeartbeat();
-  heartbeatTimer=setInterval(()=>{ if(myMemberRef) myMemberRef.update({online:true,ts:SV}); }, 8000);
-}
+function startHeartbeat(){ stopHeartbeat(); heartbeatTimer=setInterval(()=>{ if(myMemberRef)myMemberRef.update({online:true,ts:SV}); }, 8000); }
 function stopHeartbeat(){ if(heartbeatTimer){clearInterval(heartbeatTimer);heartbeatTimer=null;} }
 
-function pushSignal(to,type,extra){
-  if(!db||!roomCode||!myId)return;
-  sigOut++; setSig();
-  db.ref('rooms/'+roomCode+'/signals').push(Object.assign({from:myId,to:to,type:type,ts:SV},extra||{}));
-}
+function pushSignal(to,type,extra){ if(!db||!roomCode||!myId)return; sigOut++; setSig(); db.ref('rooms/'+roomCode+'/signals').push(Object.assign({from:myId,to:to,type:type,ts:SV},extra||{})); }
 function subscribeSignals(){
   if(!db)return;
   signalsRef=db.ref('rooms/'+roomCode+'/signals');
@@ -385,7 +381,7 @@ function subscribeSignals(){
     const sig=snap.val();
     if(!sig){snap.ref.remove();return;}
     if(sig.from===myId){snap.ref.remove();return;}
-    if(sig.to!==myId&&sig.to!=='*'){snap.ref.remove();return;}   // чужое - удаляем чисто
+    if(sig.to!==myId&&sig.to!=='*'){snap.ref.remove();return;}
     sigIn++; setSig();
     if(sig.type==='offer'||sig.type==='answer'||sig.type==='candidate') handleSignal(sig.from,sig);
     else if(sig.type==='restart'){ if(pc){pc.restartIce(); banner('Канал пересобирается…','warn');} }
@@ -395,33 +391,13 @@ function subscribeSignals(){
 function subscribeMembers(){
   if(!db)return;
   membersRef=db.ref('rooms/'+roomCode+'/members');
-  membersRef.on('child_added',(snap)=>{
-    if(snap.key===myId)return;
-    if(peerGone)return;
-    if(!peerId)peerId=snap.key;
-    if(isHost) onPeerArrived();
-    else { applyPeerState(snap.val()); markPeerOnline(); }
-  });
-  membersRef.on('child_changed',(snap)=>{
-    if(snap.key!==peerId)return;
-    const v=snap.val()||{};
-    applyPeerState(v);
-    if(v.online===false) schedulePeerOffline(); else markPeerOnline();
-  });
-  membersRef.on('child_removed',(snap)=>{ if(snap.key===peerId) onPeerLeft(); });   // явный выход
+  membersRef.on('child_added',(snap)=>{ if(snap.key===myId)return; if(peerGone)return; if(!peerId)peerId=snap.key; if(isHost)onPeerArrived(); else { applyPeerState(snap.val()); markPeerOnline(); } });
+  membersRef.on('child_changed',(snap)=>{ if(snap.key!==peerId)return; const v=snap.val()||{}; applyPeerState(v); if(v.online===false)schedulePeerOffline(); else markPeerOnline(); });
+  membersRef.on('child_removed',(snap)=>{ if(snap.key===peerId)onPeerLeft(); });
 }
 function markPeerOnline(){ if(peerOfflineTimer){clearTimeout(peerOfflineTimer);peerOfflineTimer=null;} }
-function schedulePeerOffline(){
-  markPeerOnline();
-  peerOfflineTimer=setTimeout(()=>{ if(!peerGone) onPeerLeft(); }, 22000);   // моргнул - ждём 22с пульса
-}
-async function writeMember(){
-  if(!db)return;
-  myMemberRef=db.ref('rooms/'+roomCode+'/members/'+myId);
-  await myMemberRef.set({mic:true,sharing:false,online:true,ts:SV});
-  myMemberRef.onDisconnect().update({online:false,ts:SV});   // НЕ удаляем - только метка, чтобы не выкидывать при моргании
-  startHeartbeat();
-}
+function schedulePeerOffline(){ markPeerOnline(); peerOfflineTimer=setTimeout(()=>{ if(!peerGone)onPeerLeft(); }, 22000); }
+async function writeMember(){ if(!db)return; myMemberRef=db.ref('rooms/'+roomCode+'/members/'+myId); await myMemberRef.set({mic:true,sharing:false,online:true,ts:SV}); myMemberRef.onDisconnect().update({online:false,ts:SV}); startHeartbeat(); }
 
 async function createRoom(){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';myId=genId();isHost=true;let code=genCode();for(let i=0;i<12;i++){const s=await db.ref('rooms/'+code).get();if(!s.exists())break;code=genCode();}roomCode=code;renderRoomCode(code);showScreen('wait');await writeMember();subscribeMembers();subscribeSignals();}
 async function joinRoom(code){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';const rs=await db.ref('rooms/'+code).get();if(!rs.exists())throw 'Комната не найдена. Проверь код.';const ms=await db.ref('rooms/'+code+'/members').get();if(ms.exists()&&Object.keys(ms.val()||{}).length>=2)throw 'В комнате уже два человека.';myId=genId();isHost=false;roomCode=code;await writeMember();subscribeMembers();subscribeSignals();enterCall();banner('Ты в комнате. Соединяемся…','good');sendState();}
@@ -438,14 +414,16 @@ el.btnCopyLink.addEventListener('click',()=>copyText(roomLink(),'Ссылка с
 el.btnCopyCode.addEventListener('click',()=>copyText(roomCode,'Код комнаты скопирован'));
 el.btnCancelWait.addEventListener('click',leaveAll);
 
-function enterCall(){showScreen('call');el.stageEmpty.hidden=false;el.stageEmptyText.textContent=isHost?'Напарник на связи. Нажми «Демонстрацию», чтобы показать свой экран.':'Ты подключился. Как только друг включит демонстрацию - его экран появится здесь.';el.peerLed.className='led led--green';sigIn=0;sigOut=0;setSig();setIce('new');startStats();}
+function enterCall(){showScreen('call');el.stageEmpty.hidden=false;el.stageEmptyText.textContent=isHost?'Напарник на связи. Нажми «Демонстрацию», чтобы показать свой экран.':'Ты подключился. Как только друг включит демонстрацию - его экран появится здесь.';el.peerLed.className='led led--green';sigIn=0;sigOut=0;setSig();setIce('new');pendingCandidates=[];startStats();}
+
+async function drainPending(){ while(pendingCandidates.length && pc && pc.remoteDescription){ const c=pendingCandidates.shift(); try{await pc.addIceCandidate(c);}catch(e){console.warn('pending candidate err',e);} } }
 
 function ensurePC(){
   if(pc)return pc;
   pc=new RTCPeerConnection(RTC_CONFIG);
   if(micStream)micStream.getAudioTracks().forEach((t)=>pc.addTrack(t,micStream));
   if(screenStream){const v=screenStream.getVideoTracks()[0];if(v)pc.addTrack(v,screenStream);const a=screenStream.getAudioTracks()[0];if(a)pc.addTrack(a,screenStream);}
-  pc.onicecandidate=(e)=>{ if(e.candidate&&peerId) pushSignal(peerId,'candidate',{candidate:e.candidate}); };
+  pc.onicecandidate=(e)=>{ if(e.candidate&&peerId) pushSignal(peerId,'candidate',{candidate: cleanCandidate(e.candidate)}); };
   pc.ontrack=(e)=>{
     remoteMix.addTrack(e.track);
     if(e.track.kind==='video'){el.remoteVideo.srcObject=remoteMix;el.remoteVideo.muted=true;el.remoteVideo.play().catch(()=>{});el.stageEmpty.hidden=true;}
@@ -461,7 +439,7 @@ function ensurePC(){
   };
   pc.onnegotiationneeded=async()=>{
     if(!peerId)return;
-    try{makingOffer=true;await pc.setLocalDescription(await pc.createOffer());pushSignal(peerId,'offer',{sdp:pc.localDescription});banner('→ offer отправлен','good');}
+    try{makingOffer=true;await pc.setLocalDescription(await pc.createOffer());pushSignal(peerId,'offer',{sdp: cleanDesc(pc.localDescription)});banner('→ offer отправлен','good');}
     catch(err){console.warn('offer error',err);}finally{makingOffer=false;}
   };
   return pc;
@@ -473,12 +451,18 @@ async function handleSignal(fromId,msg){
     if(msg.type==='offer'){
       const col=makingOffer||pc.signalingState!=='stable';
       if(col&&isHost)return;
+      pendingCandidates=[];
       await pc.setRemoteDescription(msg.sdp);banner('← offer принят','good');
-      await pc.setLocalDescription(await pc.createAnswer());pushSignal(fromId,'answer',{sdp:pc.localDescription});banner('→ answer отправлен','good');
+      await drainPending();
+      await pc.setLocalDescription(await pc.createAnswer());pushSignal(fromId,'answer',{sdp: cleanDesc(pc.localDescription)});banner('→ answer отправлен','good');
     } else if(msg.type==='answer'){
       await pc.setRemoteDescription(msg.sdp);banner('← answer принят','good');
+      await drainPending();
     } else if(msg.type==='candidate'){
-      try{await pc.addIceCandidate(msg.candidate);}catch{}
+      const c=msg.candidate;
+      if(!c||!c.candidate){return;}                       // пустой кандидат (старый баг) — игнор
+      if(pc.remoteDescription){ try{await pc.addIceCandidate(c);}catch(e){console.warn('addIce err',e);} }
+      else { pendingCandidates.push(c); }                 // пришёл раньше описания — в очередь
     }
   }catch(err){console.warn('signal error',err);}
 }
@@ -516,7 +500,7 @@ function leaveAll(){
   try{if(membersRef)membersRef.off();}catch{}try{if(signalsRef)signalsRef.off();}catch{}try{if(connRef)connRef.off();}catch{}
   try{if(myMemberRef){myMemberRef.remove();myMemberRef=null;}}catch{}
   try{if(isHost&&roomCode&&db)db.ref('rooms/'+roomCode).remove();}catch{}
-  membersRef=null;signalsRef=null;connRef=null;remoteMix=new MediaStream();
+  membersRef=null;signalsRef=null;connRef=null;remoteMix=new MediaStream();pendingCandidates=[];
   el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.localVideo.srcObject=null;el.localVideo.hidden=true;
   el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';
   el.btnMic.classList.remove('is-muted');el.icoMic.textContent='🎙';el.capMic.textContent='микрофон';
