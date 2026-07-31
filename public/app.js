@@ -1,6 +1,8 @@
-/* ВТОРОЙ ИГРОК - клиент: WebRTC P2P + Firebase Realtime Database (сигналы). */
+/* ВТОРОЙ ИГРОК - клиент: WebRTC P2P + Firebase Realtime Database (сигналы).
+   Финальная сборка: без блокирующих оверлеев, индикатор связи стартует всегда. */
 'use strict';
 
+// ---------- Конфиг Firebase (твой проект, регион europe-west1) ----------
 const firebaseConfig = {
   apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
   authDomain: "two-players-945a2.firebaseapp.com",
@@ -10,10 +12,20 @@ const firebaseConfig = {
   messagingSenderId: "947219222314",
   appId: "1:947219222314:web:c67fff24831d3945d61853"
 };
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const SV = firebase.database.ServerValue.TIMESTAMP;
 
+// Инициализация под защитой: даже если скрипт Firebase не доехал или
+// расширение вмешалось - файл НЕ умрёт на верхней строке.
+const hasFirebase = (typeof firebase !== 'undefined');
+let db = null, SV = null;
+if (hasFirebase) {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    SV = firebase.database.ServerValue.TIMESTAMP;
+  } catch (e) { console.warn('firebase init failed:', e); }
+}
+
+// ---------- WebRTC / качество ----------
 const RTC_CONFIG = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
@@ -23,7 +35,6 @@ const RTC_CONFIG = {
   ],
   iceCandidatePoolSize: 10
 };
-
 const QUALITY = {
   max:    { bitrate: 12000000, fps: 60, label: '1080p60 макс' },
   high:   { bitrate: 8000000,  fps: 60, label: '1080p60' },
@@ -31,6 +42,7 @@ const QUALITY = {
   eco:    { bitrate: 2000000,  fps: 30, label: '720p30' }
 };
 
+// ---------- Состояние ----------
 let roomCode = null, isHost = false, myId = null, peerId = null, pc = null;
 let micStream = null, screenStream = null, screenTracks = [];
 let makingOffer = false, statsTimer = null, prevVideo = null;
@@ -38,6 +50,7 @@ let remoteMix = new MediaStream();
 let audioCtx = null, localAnalyser = null, remoteAnalyser = null, metersRAF = null, meterBuf = null;
 let membersRef = null, signalsRef = null, myMemberRef = null;
 
+// ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 const el = {
   netLed: $('netLed'), netStatus: $('netStatus'), pingValue: $('pingValue'),
@@ -62,6 +75,7 @@ const el = {
   toast: $('toast'), remoteAudio: $('remoteAudio'), unsupported: $('unsupported')
 };
 
+// ---------- Утилиты ----------
 function genId() {
   try { return crypto.randomUUID(); }
   catch { return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -72,7 +86,6 @@ function genCode() {
   for (let i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
   return c;
 }
-
 function showScreen(name) {
   el.lobbyScreen.hidden = name !== 'lobby';
   el.waitScreen.hidden = name !== 'wait';
@@ -80,12 +93,14 @@ function showScreen(name) {
 }
 let toastTimer = null;
 function toast(msg) {
+  if (!el.toast) return;
   el.toast.textContent = msg; el.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 2800);
 }
 let bannerTimer = null;
 function banner(msg, kind) {
+  if (!el.eventBanner) return;
   el.eventBanner.textContent = msg;
   el.eventBanner.className = 'event-banner event-banner--' + (kind || 'good');
   el.eventBanner.hidden = false;
@@ -103,14 +118,20 @@ async function copyText(text, okMsg) {
 }
 function roomLink() { return location.origin + location.pathname + '?room=' + roomCode; }
 function lobbyError(msg) {
+  if (!el.lobbyError) return;
   el.lobbyError.textContent = msg; el.lobbyError.hidden = false;
   el.lobbyError.style.animation = 'none';
   void el.lobbyError.offsetWidth;
   el.lobbyError.style.animation = '';
 }
 
-// ---------- Индикатор связи с Firebase ----------
+// ---------- Индикатор связи с Firebase (стартует ВСЕГДА) ----------
 function watchConnection() {
+  if (!db) {
+    if (el.netLed) el.netLed.className = 'led led--amber';
+    if (el.netStatus) el.netStatus.textContent = 'без базы';
+    return;
+  }
   db.ref('.info/connected').on('value', (s) => {
     if (s.val() === true) {
       el.netLed.className = 'led led--green';
@@ -123,32 +144,34 @@ function watchConnection() {
   });
 }
 
-// ---------- Сигнальный слой (Firebase) ----------
+// ---------- Сигнальный слой ----------
 function pushSignal(to, type, extra) {
-  if (!roomCode || !myId) return;
+  if (!db || !roomCode || !myId) return;
   db.ref('rooms/' + roomCode + '/signals').push(
     Object.assign({ from: myId, to: to, type: type, ts: SV }, extra || {})
   );
 }
 function subscribeSignals() {
+  if (!db) return;
   signalsRef = db.ref('rooms/' + roomCode + '/signals');
   signalsRef.on('child_added', (snap) => {
     const sig = snap.val();
     if (!sig) { snap.ref.remove(); return; }
-    if (sig.from === myId) { snap.ref.remove(); return; }     // своё - выбросили
-    if (sig.to !== myId && sig.to !== '*') return;            // не нам
+    if (sig.from === myId) { snap.ref.remove(); return; }
+    if (sig.to !== myId && sig.to !== '*') return;
     if (sig.type === 'offer' || sig.type === 'answer' || sig.type === 'candidate') {
       handleSignal(sig.from, sig);
     }
-    snap.ref.remove();                                        // база не растёт
+    snap.ref.remove();
   });
 }
 function subscribeMembers() {
+  if (!db) return;
   membersRef = db.ref('rooms/' + roomCode + '/members');
   membersRef.on('child_added', (snap) => {
     if (snap.key === myId) return;
     if (!peerId) peerId = snap.key;
-    if (isHost) onPeerArrived();                              // хост стартует по приходу гостя
+    if (isHost) onPeerArrived();
   });
   membersRef.on('child_changed', (snap) => {
     if (snap.key === peerId) applyPeerState(snap.val());
@@ -158,16 +181,18 @@ function subscribeMembers() {
   });
 }
 async function writeMember() {
+  if (!db) return;
   myMemberRef = db.ref('rooms/' + roomCode + '/members/' + myId);
   await myMemberRef.set({ mic: true, sharing: false, ts: SV });
-  myMemberRef.onDisconnect().remove();                        // закрыл вкладку - исчез
+  myMemberRef.onDisconnect().remove();
 }
 
 // ---------- Комнаты ----------
 async function createRoom() {
+  if (!db) throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';
   myId = genId(); isHost = true;
   let code = genCode();
-  for (let i = 0; i < 12; i++) {                              // уникальность кода
+  for (let i = 0; i < 12; i++) {
     const s = await db.ref('rooms/' + code).get();
     if (!s.exists()) break;
     code = genCode();
@@ -180,6 +205,7 @@ async function createRoom() {
   subscribeSignals();
 }
 async function joinRoom(code) {
+  if (!db) throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';
   const roomSnap = await db.ref('rooms/' + code).get();
   if (!roomSnap.exists()) throw 'Комната не найдена. Проверь код.';
   const mSnap = await db.ref('rooms/' + code + '/members').get();
@@ -194,7 +220,6 @@ async function joinRoom(code) {
   banner('Ты в комнате. Соединяемся...', 'good');
   sendState();
 }
-
 function renderRoomCode(code) {
   el.roomCodeDisplay.innerHTML = '';
   for (const ch of code) {
@@ -203,8 +228,12 @@ function renderRoomCode(code) {
   }
 }
 
+// ---------- Микрофон (проверка поддержки - только здесь, в момент клика) ----------
 async function ensureMic() {
   if (micStream) return micStream;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const e = new Error('NO_MEDIA'); throw e;
+  }
   micStream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
     video: false
@@ -213,14 +242,24 @@ async function ensureMic() {
   return micStream;
 }
 
+// ---------- Обработчики кнопок (навешиваются БЕЗУСЛОВНО при загрузке) ----------
 el.btnCreate.addEventListener('click', async () => {
   try {
     el.btnCreate.disabled = true;
+    el.lobbyError.hidden = true;
     await ensureMic();
     await createRoom();
-  } catch {
+  } catch (err) {
     el.btnCreate.disabled = false;
-    lobbyError('Нет доступа к микрофону. Разреши доступ в браузере и попробуй снова.');
+    if (err && err.name === 'NotAllowedError') {
+      lobbyError('Ты запретил микрофон. Разреши его в браузере и нажми «Создать» снова.');
+    } else if (err && err.message === 'NO_MEDIA') {
+      lobbyError('Этот браузер не даёт доступ к микрофону. Открой сайт в Chrome, Edge или Safari.');
+    } else if (typeof err === 'string') {
+      lobbyError(err);
+    } else {
+      lobbyError('Не удалось создать комнату. Обнови страницу (Ctrl+Shift+R) и попробуй снова.');
+    }
   }
 });
 el.btnJoin.addEventListener('click', joinByCode);
@@ -233,15 +272,21 @@ async function joinByCode() {
   if (code.length !== 4) return lobbyError('Код комнаты - 4 символа.');
   try {
     el.btnJoin.disabled = true;
+    el.lobbyError.hidden = true;
     await ensureMic();
     await joinRoom(code);
     el.btnJoin.disabled = false;
   } catch (err) {
     el.btnJoin.disabled = false;
-    lobbyError(typeof err === 'string' ? err : 'Нет доступа к микрофону. Разреши доступ в браузере.');
+    if (err && err.name === 'NotAllowedError') {
+      lobbyError('Ты запретил микрофон. Разреши его и нажми «Войти» снова.');
+    } else if (err && err.message === 'NO_MEDIA') {
+      lobbyError('Этот браузер не даёт доступ к микрофону. Открой сайт в Chrome, Edge или Safari.');
+    } else {
+      lobbyError(typeof err === 'string' ? err : 'Нет доступа к микрофону. Разреши его в браузере.');
+    }
   }
 }
-
 el.btnCopyLink.addEventListener('click', () => copyText(roomLink(), 'Ссылка скопирована - отправь другу'));
 el.btnCopyCode.addEventListener('click', () => copyText(roomCode, 'Код комнаты скопирован'));
 el.btnCancelWait.addEventListener('click', leaveAll);
@@ -270,7 +315,6 @@ function ensurePC() {
   pc.onicecandidate = (e) => {
     if (e.candidate && peerId) pushSignal(peerId, 'candidate', { candidate: e.candidate });
   };
-
   pc.ontrack = (e) => {
     remoteMix.addTrack(e.track);
     if (e.track.kind === 'video') {
@@ -291,7 +335,6 @@ function ensurePC() {
       }
     };
   };
-
   pc.onconnectionstatechange = () => {
     if (!pc) return;
     const s = pc.connectionState;
@@ -307,7 +350,6 @@ function ensurePC() {
       pc.restartIce();
     }
   };
-
   pc.onnegotiationneeded = async () => {
     if (!peerId) return;
     try {
@@ -317,10 +359,8 @@ function ensurePC() {
     } catch (err) { console.warn('offer error', err); }
     finally { makingOffer = false; }
   };
-
   return pc;
 }
-
 async function handleSignal(fromId, msg) {
   if (!peerId) peerId = fromId;
   if (!pc) ensurePC();
@@ -338,7 +378,6 @@ async function handleSignal(fromId, msg) {
     }
   } catch (err) { console.warn('signal error', err); }
 }
-
 function onPeerArrived() {
   enterCall();
   ensurePC();
@@ -369,6 +408,9 @@ function onPeerLeft() {
 // ---------- Демонстрация экрана ----------
 el.btnShare.addEventListener('click', async () => {
   if (screenStream) return stopScreenShare(false);
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    return toast('Демонстрация экрана недоступна в этом браузере. Открой сайт в Chrome или Edge.');
+  }
   try {
     el.btnShare.disabled = true;
     screenStream = await navigator.mediaDevices.getDisplayMedia({
@@ -463,7 +505,10 @@ function applyPeerState(state) {
 
 el.btnCopyCallLink.addEventListener('click', () => copyText(roomLink(), 'Ссылка на комнату скопирована'));
 el.btnLeave.addEventListener('click', leaveAll);
-window.addEventListener('beforeunload', () => { if (myMemberRef) myMemberRef.remove(); if (pc) pc.close(); });
+window.addEventListener('beforeunload', () => {
+  try { if (myMemberRef) myMemberRef.remove(); } catch {}
+  if (pc) pc.close();
+});
 
 function leaveAll() {
   stopScreenShare(true);
@@ -471,10 +516,10 @@ function leaveAll() {
   if (pc) { pc.close(); pc = null; }
   if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   stopMeters();
-  if (membersRef) membersRef.off();
-  if (signalsRef) signalsRef.off();
-  if (myMemberRef) { myMemberRef.remove(); myMemberRef = null; }
-  if (isHost && roomCode) db.ref('rooms/' + roomCode).remove();   // хост убирает комнату целиком
+  try { if (membersRef) membersRef.off(); } catch {}
+  try { if (signalsRef) signalsRef.off(); } catch {}
+  try { if (myMemberRef) { myMemberRef.remove(); myMemberRef = null; } } catch {}
+  try { if (isHost && roomCode && db) db.ref('rooms/' + roomCode).remove(); } catch {}
   membersRef = null; signalsRef = null;
   remoteMix = new MediaStream();
   el.remoteVideo.srcObject = null;
@@ -594,11 +639,14 @@ function stopMeters() {
   el.meterLocal.style.width = '0%'; el.meterRemote.style.width = '0%';
 }
 
-// ---------- Запуск ----------
+// ---------- Запуск (НИКАКИХ блокирующих оверлеев) ----------
 (function init() {
-  const supported = navigator.mediaDevices && window.RTCPeerConnection && navigator.mediaDevices.getDisplayMedia;
-  if (!supported) { el.unsupported.hidden = false; return; }
-  watchConnection();
+  // Принудительно прячем чёрную заглушку - что бы ни случилось на старте,
+  // интерфейс должен быть виден. Поддержка проверяется лениво, при клике.
+  if (el.unsupported) el.unsupported.hidden = true;
+
+  watchConnection();   // индикатор связи стартует всегда
+
   const urlRoom = new URLSearchParams(location.search).get('room');
   if (urlRoom) {
     el.joinCode.value = urlRoom.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
