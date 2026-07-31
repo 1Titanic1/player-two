@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ВТОРОЙ ИГРОК — кооп-звонок с демонстрацией экрана</title>
+  <meta name="description" content="Прямой P2P-звонок: голос и демонстрация экрана без посредников. 1080p60, минимальная задержка.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tektur:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow bg-glow--amber" aria-hidden="true"></div>
+  <div class="bg-glow bg-glow--teal" aria-hidden="true"></div>
+  <div class="bg-scan" aria-hidden="true"></div>
+  <div class="bg-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">▶▶</span>
+      <span class="brand-name">ВТОРОЙ<span class="brand-accent">ИГРОК</span></span>
+    </div>
+    <div class="topbar-right">
+      <div class="net-pill" title="Состояние связи с сервером">
+        <span class="led" id="netLed"></span><span id="netStatus">подключение…</span>
+      </div>
+      <div class="ping-pill" title="Задержка до сервера">
+        <span class="ping-label">PING</span><span id="pingValue">—</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="screen screen--lobby" id="lobbyScreen">
+      <div class="lobby-left">
+        <p class="overline">// кооперативная линия связи</p>
+        <h1 class="title">ИГРАЙ<br><span class="title-outline">ВМЕСТЕ</span><br>НА РАССТОЯНИИ</h1>
+        <p class="lead">Голосовой звонок и демонстрация экрана <b>напрямую</b> между твоим ПК
+          и устройством друга. Видео не проходит через чужие серверы —
+          поэтому качество и задержка как в локальной сети.</p>
+        <div class="route">
+          <div class="route-node"><span class="route-ico">🖥</span><span class="route-cap">твой ПК</span></div>
+          <div class="route-line">
+            <span class="route-packet"></span><span class="route-packet"></span><span class="route-packet"></span>
+            <span class="route-cap-line">P2P · WebRTC · без посредников</span>
+          </div>
+          <div class="route-node"><span class="route-ico">📱</span><span class="route-cap">iPad друга</span></div>
+        </div>
+        <ul class="checks">
+          <li>До <b>1080p / 60 FPS</b>, битрейт переключается прямо во время звонка</li>
+          <li>Звук игры захватывается вместе с экраном</li>
+          <li>Живая телеметрия: пинг, FPS, битрейт, потери пакетов</li>
+        </ul>
+      </div>
+      <div class="lobby-right">
+        <div class="panel panel--create">
+          <div class="panel-tag">игрок 1</div>
+          <h2 class="panel-title">Создать комнату</h2>
+          <p class="panel-text">Ты за хоста: запускаешь игру и показываешь экран.</p>
+          <button class="btn btn--amber btn--big" id="btnCreate"><span class="btn-ico">⚡</span>Создать</button>
+        </div>
+        <div class="panel-divider"><span>или</span></div>
+        <div class="panel panel--join">
+          <div class="panel-tag panel-tag--cyan">игрок 2</div>
+          <h2 class="panel-title">Присоединиться</h2>
+          <p class="panel-text">Введи код из 4 символов, который прислал друг.</p>
+          <div class="join-row">
+            <input id="joinCode" class="code-input" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
+            <button class="btn btn--green" id="btnJoin">Войти</button>
+          </div>
+        </div>
+        <p class="lobby-error" id="lobbyError" hidden></p>
+        <p class="lobby-hint">На ПК открывай в <b>Chrome / Edge</b>, на iPad — в <b>Safari</b>.</p>
+      </div>
+    </section>
+
+    <section class="screen screen--wait" id="waitScreen" hidden>
+      <p class="overline">// комната готова</p>
+      <h2 class="wait-title">Код комнаты</h2>
+      <div class="room-code" id="roomCodeDisplay"><span>·</span><span>·</span><span>·</span><span>·</span></div>
+      <div class="wait-actions">
+        <button class="btn btn--amber" id="btnCopyLink">🔗 Скопировать ссылку</button>
+        <button class="btn btn--ghost" id="btnCopyCode">Скопировать код</button>
+      </div>
+      <div class="wait-status"><span class="spinner"></span><span id="waitText">Ждём второго игрока… Отправь другу ссылку.</span></div>
+      <button class="btn btn--ghost btn--small" id="btnCancelWait">← отмена</button>
+    </section>
+
+    <section class="screen screen--call" id="callScreen" hidden>
+      <div class="call-layout">
+        <div class="stage">
+          <video id="remoteVideo" autoplay playsinline></video>
+          <div class="stage-empty" id="stageEmpty">
+            <span class="stage-empty-ico">📡</span>
+            <p id="stageEmptyText">Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.</p>
+          </div>
+          <div class="stage-badge" id="stageBadge" hidden><span class="led led--green"></span> ЭКРАН В ЭФИРЕ</div>
+          <video id="localVideo" class="pip" autoplay playsinline muted hidden></video>
+          <div class="event-banner" id="eventBanner" hidden></div>
+        </div>
+        <aside class="side">
+          <div class="side-card">
+            <div class="side-head"><span class="led led--green" id="peerLed"></span><span id="peerName">Напарник</span></div>
+            <div class="meter-row"><span class="meter-label">его микрофон</span>
+              <div class="meter"><div class="meter-fill meter-fill--remote" id="meterRemote"></div></div></div>
+            <div class="meter-row"><span class="meter-label">твой микрофон</span>
+              <div class="meter"><div class="meter-fill meter-fill--local" id="meterLocal"></div></div></div>
+          </div>
+          <div class="side-card side-card--stats">
+            <h3 class="side-title">Телеметрия канала</h3>
+            <div class="stat"><div class="stat-top"><span>Разрешение</span><b id="statRes">—</b></div></div>
+            <div class="stat"><div class="stat-top"><span>FPS</span><b id="statFps">—</b></div><div class="stat-bar"><i id="barFps"></i></div></div>
+            <div class="stat"><div class="stat-top"><span>Битрейт</span><b id="statBitrate">—</b></div><div class="stat-bar"><i id="barBitrate"></i></div></div>
+            <div class="stat"><div class="stat-top"><span>Пинг (RTT)</span><b id="statRtt">—</b></div><div class="stat-bar"><i id="barRtt"></i></div></div>
+            <div class="stat"><div class="stat-top"><span>Джиттер</span><b id="statJitter">—</b></div></div>
+            <div class="stat"><div class="stat-top"><span>Потери пакетов</span><b id="statLoss">—</b></div><div class="stat-bar"><i id="barLoss"></i></div></div>
+          </div>
+          <div class="side-card side-card--tips">
+            <h3 class="side-title">Совет</h3>
+            <p id="tipText">При запуске демонстрации поставь в Chrome галочку
+              «Также делиться системным звуком» — друг услышит игру, а не только тебя.</p>
+          </div>
+        </aside>
+      </div>
+      <div class="dock">
+        <button class="dock-btn" id="btnMic" title="Включить / выключить микрофон">
+          <span class="dock-ico" id="icoMic">🎙</span><span class="dock-cap" id="capMic">микрофон</span></button>
+        <button class="dock-btn dock-btn--share" id="btnShare" title="Демонстрация экрана">
+          <span class="dock-ico">🖥</span><span class="dock-cap" id="capShare">демонстрация</span></button>
+        <div class="dock-quality">
+          <label for="qualitySelect">качество</label>
+          <select id="qualitySelect">
+            <option value="max">1080p · 60 fps · макс</option>
+            <option value="high" selected>1080p · 60 fps</option>
+            <option value="medium">720p · 45 fps</option>
+            <option value="eco">720p · 30 fps</option>
+          </select>
+        </div>
+        <button class="dock-btn" id="btnCopyCallLink" title="Скопировать ссылку на комнату">
+          <span class="dock-ico">🔗</span><span class="dock-cap">ссылка</span></button>
+        <button class="dock-btn dock-btn--leave" id="btnLeave" title="Покинуть комнату">
+          <span class="dock-ico">⏻</span><span class="dock-cap">выйти</span></button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>WebRTC P2P — видео идёт напрямую между устройствами</span>
+    <span class="foot-sep">•</span>
+    <span>сервер передаёт только рукопожатие</span>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+  <audio id="remoteAudio" autoplay playsinline></audio>
+  <div class="unsupported" id="unsupported" hidden>
+    Твой браузер не поддерживает WebRTC. Открой сайт в Chrome, Edge или Safari.
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
