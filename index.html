@@ -1,167 +1,420 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ВТОРОЙ ИГРОК — кооп-звонок с демонстрацией экрана</title>
-  <meta name="description" content="Прямой P2P-звонок: голос и демонстрация экрана без посредников. 1080p60, минимальная задержка.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Tektur:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="public/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ВТОРОЙ ИГРОК — кооп-звонок с демонстрацией экрана</title>
+<meta name="description" content="Прямой P2P-звонок: голос и демонстрация экрана без посредников. 1080p60, минимальная задержка.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tektur:wght@400;500;600;700;800&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1822;--bg-deep:#081019;--surface:#14242f;--surface-2:#1a2f3d;--line:#25455a;--line-soft:#1c3648;--text:#e9f3f7;--muted:#8fa9b8;--amber:#ffb454;--amber-hot:#ffc879;--green:#3ce08b;--cyan:#5ac8ff;--red:#ff5d6c;--display:'Tektur','Arial Black',sans-serif;--body:'Golos Text','Segoe UI',sans-serif;--mono:'JetBrains Mono','Consolas',monospace;--cut:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);--cut-s:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}
+body{font-family:var(--body);color:var(--text);background:var(--bg);min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+::selection{background:var(--amber);color:#1a1206}
+.bg-grid{position:fixed;inset:0;z-index:-4;background:repeating-linear-gradient(0deg,rgba(90,200,255,.035) 0 1px,transparent 1px 44px),repeating-linear-gradient(90deg,rgba(90,200,255,.035) 0 1px,transparent 1px 44px);mask-image:radial-gradient(ellipse 90% 80% at 50% 30%,#000 40%,transparent 100%)}
+.bg-glow{position:fixed;z-index:-5;width:60vw;height:60vw;border-radius:50%;filter:blur(90px);opacity:.5;animation:glowDrift 26s ease-in-out infinite alternate}
+.bg-glow--amber{top:-28vw;left:-18vw;background:rgba(255,180,84,.10)}
+.bg-glow--teal{bottom:-30vw;right:-20vw;background:rgba(60,224,139,.08);animation-delay:-13s}
+@keyframes glowDrift{from{transform:translate(0,0) scale(1)}to{transform:translate(6vw,4vh) scale(1.15)}}
+.bg-scan{position:fixed;inset:0;z-index:-3;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.013) 0 1px,transparent 1px 3px)}
+.bg-dots i{position:fixed;z-index:-2;width:3px;height:3px;background:var(--cyan);opacity:.25;border-radius:1px;animation:dotFloat 18s linear infinite alternate}
+.bg-dots i:nth-child(1){top:18%;left:8%;background:var(--amber);animation-duration:21s}
+.bg-dots i:nth-child(2){top:70%;left:14%;animation-duration:16s;animation-delay:-4s}
+.bg-dots i:nth-child(3){top:30%;left:88%;background:var(--green);animation-duration:24s;animation-delay:-9s}
+.bg-dots i:nth-child(4){top:82%;left:76%;background:var(--amber);animation-duration:19s;animation-delay:-2s}
+.bg-dots i:nth-child(5){top:12%;left:62%;animation-duration:22s;animation-delay:-12s}
+.bg-dots i:nth-child(6){top:55%;left:95%;background:var(--green);animation-duration:17s;animation-delay:-7s}
+@keyframes dotFloat{from{transform:translate(0,0)}to{transform:translate(-30px,40px)}}
+.led{width:9px;height:9px;border-radius:50%;background:#4a6474;display:inline-block;flex:none;transition:background .3s,box-shadow .3s}
+.led--green{background:var(--green);color:rgba(60,224,139,.6);animation:ledPulse 1.8s ease-in-out infinite}
+.led--amber{background:var(--amber);color:rgba(255,180,84,.6);animation:ledPulse 1.1s ease-in-out infinite}
+.led--red{background:var(--red);color:rgba(255,93,108,.6);animation:ledPulse .7s ease-in-out infinite}
+@keyframes ledPulse{0%,100%{box-shadow:0 0 0 0 currentColor}50%{box-shadow:0 0 10px 2px currentColor}}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:1px solid var(--line-soft);background:rgba(13,24,34,.7);backdrop-filter:blur(6px);position:sticky;top:0;z-index:50}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-mark{font-family:var(--display);color:var(--amber);font-size:15px;letter-spacing:-3px;transform:translateY(-1px)}
+.brand-name{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:.06em}
+.brand-accent{color:var(--green);margin-left:.45em}
+.topbar-right{display:flex;align-items:center;gap:12px}
+.net-pill,.ping-pill{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line-soft);background:var(--surface);padding:6px 12px;clip-path:var(--cut-s)}
+.ping-pill #pingValue{color:var(--cyan);font-weight:600}
+.ping-label{letter-spacing:.12em;opacity:.7}
+main{flex:1;display:flex;flex-direction:column;width:100%;max-width:1240px;margin:0 auto;padding:0 28px}
+.screen{flex:1;display:flex;flex-direction:column}
+.overline{font-family:var(--mono);font-size:12px;letter-spacing:.18em;color:var(--green);margin-bottom:14px}
+.screen--lobby{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;align-items:center;padding:56px 0 40px}
+.lobby-left{animation:rise .7s cubic-bezier(.2,.8,.2,1) both}
+.lobby-right{animation:rise .7s cubic-bezier(.2,.8,.2,1) .15s both}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+.title{font-family:var(--display);font-weight:800;font-size:clamp(44px,6.2vw,84px);line-height:.98;letter-spacing:.01em;margin-bottom:22px}
+.title-outline{color:transparent;-webkit-text-stroke:2px var(--amber)}
+.lead{color:var(--muted);font-size:17px;line-height:1.6;max-width:46ch;margin-bottom:30px}
+.lead b{color:var(--text);font-weight:600}
+.route{display:flex;align-items:center;gap:18px;border:1px solid var(--line-soft);background:var(--surface);clip-path:var(--cut);padding:18px 22px;margin-bottom:26px;max-width:520px}
+.route-node{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none}
+.route-ico{font-size:26px;filter:drop-shadow(0 0 8px rgba(90,200,255,.35))}
+.route-cap{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.08em}
+.route-line{flex:1;position:relative;height:2px;min-width:90px;background:repeating-linear-gradient(90deg,var(--line) 0 8px,transparent 8px 15px)}
+.route-packet{position:absolute;top:-3px;left:0;width:8px;height:8px;background:var(--green);border-radius:1px;box-shadow:0 0 8px var(--green);animation:packetRun 2.4s linear infinite}
+.route-packet:nth-child(2){background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation-delay:.8s}
+.route-packet:nth-child(3){background:var(--amber);box-shadow:0 0 8px var(--amber);animation-delay:1.6s}
+@keyframes packetRun{0%{left:-8px;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
+.route-cap-line{position:absolute;top:-24px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--muted);white-space:nowrap}
+.checks{list-style:none;display:flex;flex-direction:column;gap:9px}
+.checks li{color:var(--muted);font-size:15px;padding-left:22px;position:relative}
+.checks li::before{content:'▸';position:absolute;left:0;color:var(--amber);font-family:var(--display)}
+.checks b{color:var(--cyan);font-weight:600}
+.panel{background:var(--surface);border:1px solid var(--line-soft);clip-path:var(--cut);padding:26px 28px;transition:border-color .25s,transform .25s,box-shadow .25s}
+.panel:hover{border-color:var(--line);transform:translateY(-3px);box-shadow:0 14px 34px -18px rgba(0,0,0,.8)}
+.panel-tag{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.16em;color:var(--amber);border:1px solid rgba(255,180,84,.4);padding:3px 10px;margin-bottom:12px;clip-path:var(--cut-s)}
+.panel-tag--cyan{color:var(--cyan);border-color:rgba(90,200,255,.4)}
+.panel-title{font-family:var(--display);font-size:24px;font-weight:700;margin-bottom:6px;letter-spacing:.02em}
+.panel-text{color:var(--muted);font-size:14.5px;line-height:1.55;margin-bottom:18px}
+.panel-divider{display:flex;align-items:center;gap:14px;margin:16px 0;color:var(--muted);font-family:var(--mono);font-size:12px}
+.panel-divider::before,.panel-divider::after{content:'';flex:1;height:1px;background:var(--line-soft)}
+.join-row{display:flex;gap:12px}
+.code-input{flex:1;min-width:0;font-family:var(--mono);font-size:26px;font-weight:700;text-align:center;letter-spacing:.45em;text-transform:uppercase;color:var(--text);background:var(--bg-deep);border:1px solid var(--line);padding:10px 4px 10px 14px;clip-path:var(--cut-s);outline:none;transition:border-color .2s,box-shadow .2s}
+.code-input::placeholder{color:#3d5a6d;letter-spacing:.45em}
+.code-input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(90,200,255,.15)}
+.lobby-error{margin-top:14px;color:var(--red);font-size:14px;border-left:3px solid var(--red);padding:8px 12px;background:rgba(255,93,108,.08);animation:shake .35s ease}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.lobby-hint{margin-top:16px;font-size:13px;color:var(--muted)}
+.lobby-hint b{color:var(--text)}
+.btn{font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.05em;text-transform:uppercase;color:var(--text);background:var(--surface-2);border:1px solid var(--line);cursor:pointer;padding:12px 22px;clip-path:var(--cut-s);display:inline-flex;align-items:center;gap:9px;transition:transform .18s,box-shadow .18s,background .18s,border-color .18s}
+.btn:hover{transform:translateY(-2px)}.btn:active{transform:translateY(1px) scale(.98)}
+.btn-ico{font-size:16px}
+.btn--amber{background:linear-gradient(160deg,var(--amber-hot),var(--amber) 55%,#e89a2e);color:#241300;border-color:transparent}
+.btn--amber:hover{box-shadow:0 8px 26px -8px rgba(255,180,84,.55)}
+.btn--green{background:linear-gradient(160deg,#5ff0a8,var(--green) 60%,#22b86b);color:#03230f;border-color:transparent}
+.btn--green:hover{box-shadow:0 8px 26px -8px rgba(60,224,139,.5)}
+.btn--ghost{background:transparent;color:var(--muted)}
+.btn--ghost:hover{color:var(--text);border-color:var(--line)}
+.btn--big{padding:15px 28px;font-size:16px;width:100%;justify-content:center}
+.btn--small{padding:8px 16px;font-size:12.5px}
+.screen--wait{align-items:center;justify-content:center;text-align:center;padding:48px 0;gap:22px;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+.wait-title{font-family:var(--display);font-size:30px;font-weight:700}
+.room-code{display:flex;gap:14px;margin:6px 0 4px}
+.room-code span{font-family:var(--display);font-weight:800;font-size:clamp(52px,9vw,88px);line-height:1;color:var(--amber);background:var(--surface);border:1px solid var(--line);width:clamp(72px,11vw,108px);padding:22px 0;clip-path:var(--cut);text-shadow:0 0 24px rgba(255,180,84,.35);animation:codeIn .45s cubic-bezier(.2,.9,.3,1.4) both}
+.room-code span:nth-child(2){animation-delay:.08s}.room-code span:nth-child(3){animation-delay:.16s}.room-code span:nth-child(4){animation-delay:.24s}
+@keyframes codeIn{from{opacity:0;transform:translateY(14px) scale(.7);filter:blur(5px)}to{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+.wait-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.wait-status{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:15px}
+.spinner{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--green);animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.screen--call{padding:20px 0 24px;gap:16px;animation:rise .4s ease both}
+.call-layout{display:grid;grid-template-columns:1fr 300px;gap:16px;flex:1;min-height:0}
+.stage{position:relative;background:var(--bg-deep);border:1px solid var(--line-soft);clip-path:var(--cut);overflow:hidden;min-height:380px}
+#remoteVideo{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+.stage-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px;background:radial-gradient(ellipse 60% 50% at 50% 45%,rgba(90,200,255,.06),transparent)}
+.stage-empty-ico{font-size:52px;animation:bob 3s ease-in-out infinite;filter:drop-shadow(0 0 18px rgba(90,200,255,.4))}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+.stage-empty p{color:var(--muted);font-size:16px;max-width:42ch;line-height:1.55}
+.stage-badge{position:absolute;top:14px;left:14px;z-index:5;display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;color:var(--green);background:rgba(8,16,25,.85);border:1px solid rgba(60,224,139,.4);padding:7px 13px;clip-path:var(--cut-s);animation:rise .35s ease both}
+.pip{position:absolute;right:14px;bottom:14px;z-index:5;width:23%;max-width:300px;aspect-ratio:16/9;object-fit:cover;background:#000;border:1px solid var(--line);clip-path:var(--cut-s);box-shadow:0 10px 30px -8px rgba(0,0,0,.8);animation:rise .35s ease both}
+.event-banner{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;font-size:14px;font-weight:500;background:rgba(8,16,25,.92);border:1px solid var(--line);padding:9px 18px;clip-path:var(--cut-s);animation:bannerIn .35s cubic-bezier(.2,.9,.3,1.3) both}
+.event-banner--good{color:var(--green);border-color:rgba(60,224,139,.45)}
+.event-banner--warn{color:var(--amber);border-color:rgba(255,180,84,.45)}
+@keyframes bannerIn{from{opacity:0;transform:translate(-50%,-14px)}to{opacity:1;transform:translate(-50%,0)}}
+.side{display:flex;flex-direction:column;gap:14px;min-height:0;overflow-y:auto}
+.side-card{background:var(--surface);border:1px solid var(--line-soft);clip-path:var(--cut);padding:18px 20px}
+.side-head{display:flex;align-items:center;gap:10px;font-family:var(--display);font-size:17px;font-weight:600;margin-bottom:14px}
+.side-title{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:14px}
+.meter-row{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}.meter-row:last-child{margin-bottom:0}
+.meter-label{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.meter{height:8px;background:var(--bg-deep);border:1px solid var(--line-soft);overflow:hidden}
+.meter-fill{height:100%;width:0%;transition:width .09s linear}
+.meter-fill--local{background:linear-gradient(90deg,#1f9d5f,var(--green))}
+.meter-fill--remote{background:linear-gradient(90deg,#2f86b8,var(--cyan))}
+.stat{margin-bottom:13px}.stat:last-child{margin-bottom:0}
+.stat-top{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--muted);margin-bottom:5px}
+.stat-top b{font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--cyan)}
+.stat-bar{height:4px;background:var(--bg-deep);overflow:hidden}
+.stat-bar i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--cyan));transition:width .5s cubic-bezier(.2,.8,.2,1),background .5s}
+.stat-bar i.warn{background:linear-gradient(90deg,var(--amber),#ff8f3d)}
+.stat-bar i.bad{background:linear-gradient(90deg,#ff8f3d,var(--red))}
+.side-card--tips p{font-size:13.5px;color:var(--muted);line-height:1.6}
+.dock{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line-soft);clip-path:var(--cut);padding:14px 20px}
+.dock-btn{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:88px;padding:11px 14px 9px;background:var(--surface-2);border:1px solid var(--line);color:var(--text);cursor:pointer;clip-path:var(--cut-s);transition:transform .16s,border-color .16s,box-shadow .16s,background .16s}
+.dock-btn:hover{transform:translateY(-3px);border-color:var(--cyan)}.dock-btn:active{transform:translateY(0) scale(.97)}
+.dock-ico{font-size:21px;line-height:1}
+.dock-cap{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--muted)}
+.dock-btn--share.is-live{border-color:var(--green);box-shadow:0 0 18px -4px rgba(60,224,139,.55);background:rgba(60,224,139,.1)}
+.dock-btn--share.is-live .dock-cap{color:var(--green)}
+.dock-btn.is-muted{border-color:var(--red);background:rgba(255,93,108,.1)}
+.dock-btn.is-muted .dock-ico{opacity:.45}.dock-btn.is-muted .dock-cap{color:var(--red)}
+.dock-btn--leave:hover{border-color:var(--red)}
+.dock-quality{display:flex;flex-direction:column;gap:5px;padding:0 6px}
+.dock-quality label{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;color:var(--muted)}
+.dock-quality select{font-family:var(--mono);font-size:13px;color:var(--text);background:var(--surface-2);border:1px solid var(--line);padding:8px 10px;clip-path:var(--cut-s);outline:none;cursor:pointer}
+.dock-quality select:focus{border-color:var(--cyan)}
+.foot{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding:16px 20px 22px;font-family:var(--mono);font-size:11.5px;color:#54707f}
+.foot-sep{opacity:.5}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:100;font-size:14.5px;font-weight:500;background:var(--surface-2);color:var(--text);border:1px solid var(--amber);padding:12px 22px;clip-path:var(--cut-s);box-shadow:0 12px 34px -10px rgba(0,0,0,.8);animation:toastIn .3s cubic-bezier(.2,.9,.3,1.3) both}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.unsupported{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;text-align:center;padding:30px;background:rgba(8,16,25,.96);color:var(--red);font-size:18px;line-height:1.6}
+@media (max-width:980px){.screen--lobby{grid-template-columns:1fr;gap:36px;padding-top:36px}.call-layout{grid-template-columns:1fr}.stage{min-height:0;height:52vh}.side{display:grid;grid-template-columns:1fr 1fr;overflow:visible}.side-card--tips{grid-column:1/-1}main{padding:0 16px}}
+@media (max-width:620px){.side{grid-template-columns:1fr}.topbar{padding:12px 16px}.brand-name{font-size:16px}.dock{gap:8px;padding:12px}.dock-btn{min-width:74px}.pip{width:34%}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+</style>
 </head>
 <body>
-  <div class="bg-grid" aria-hidden="true"></div>
-  <div class="bg-glow bg-glow--amber" aria-hidden="true"></div>
-  <div class="bg-glow bg-glow--teal" aria-hidden="true"></div>
-  <div class="bg-scan" aria-hidden="true"></div>
-  <div class="bg-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow bg-glow--amber" aria-hidden="true"></div>
+<div class="bg-glow bg-glow--teal" aria-hidden="true"></div>
+<div class="bg-scan" aria-hidden="true"></div>
+<div class="bg-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">▶▶</span>
-      <span class="brand-name">ВТОРОЙ<span class="brand-accent">ИГРОК</span></span>
-    </div>
-    <div class="topbar-right">
-      <div class="net-pill" title="Связь с сигнальным каналом (Firebase)">
-        <span class="led" id="netLed"></span><span id="netStatus">подключение…</span>
-      </div>
-      <div class="ping-pill" title="Задержка до напарника (RTT)">
-        <span class="ping-label">PING</span><span id="pingValue">—</span>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <section class="screen screen--lobby" id="lobbyScreen">
-      <div class="lobby-left">
-        <p class="overline">// кооперативная линия связи</p>
-        <h1 class="title">ИГРАЙ<br><span class="title-outline">ВМЕСТЕ</span><br>НА РАССТОЯНИИ</h1>
-        <p class="lead">Голосовой звонок и демонстрация экрана <b>напрямую</b> между твоим ПК
-          и устройством друга. Видео не проходит через чужие серверы —
-          поэтому качество и задержка как в локальной сети.</p>
-        <div class="route">
-          <div class="route-node"><span class="route-ico">🖥</span><span class="route-cap">твой ПК</span></div>
-          <div class="route-line">
-            <span class="route-packet"></span><span class="route-packet"></span><span class="route-packet"></span>
-            <span class="route-cap-line">P2P · WebRTC · без посредников</span>
-          </div>
-          <div class="route-node"><span class="route-ico">📱</span><span class="route-cap">iPad друга</span></div>
-        </div>
-        <ul class="checks">
-          <li>До <b>1080p / 60 FPS</b>, битрейт переключается прямо во время звонка</li>
-          <li>Звук игры захватывается вместе с экраном</li>
-          <li>Живая телеметрия: пинг, FPS, битрейт, потери пакетов</li>
-        </ul>
-      </div>
-      <div class="lobby-right">
-        <div class="panel panel--create">
-          <div class="panel-tag">игрок 1</div>
-          <h2 class="panel-title">Создать комнату</h2>
-          <p class="panel-text">Ты за хоста: запускаешь игру и показываешь экран.</p>
-          <button class="btn btn--amber btn--big" id="btnCreate"><span class="btn-ico">⚡</span>Создать</button>
-        </div>
-        <div class="panel-divider"><span>или</span></div>
-        <div class="panel panel--join">
-          <div class="panel-tag panel-tag--cyan">игрок 2</div>
-          <h2 class="panel-title">Присоединиться</h2>
-          <p class="panel-text">Введи код из 4 символов, который прислал друг.</p>
-          <div class="join-row">
-            <input id="joinCode" class="code-input" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
-            <button class="btn btn--green" id="btnJoin">Войти</button>
-          </div>
-        </div>
-        <p class="lobby-error" id="lobbyError" hidden></p>
-        <p class="lobby-hint">На ПК открывай в <b>Chrome / Edge</b>, на iPad — в <b>Safari</b>.</p>
-      </div>
-    </section>
-
-    <section class="screen screen--wait" id="waitScreen" hidden>
-      <p class="overline">// комната готова</p>
-      <h2 class="wait-title">Код комнаты</h2>
-      <div class="room-code" id="roomCodeDisplay"><span>·</span><span>·</span><span>·</span><span>·</span></div>
-      <div class="wait-actions">
-        <button class="btn btn--amber" id="btnCopyLink">🔗 Скопировать ссылку</button>
-        <button class="btn btn--ghost" id="btnCopyCode">Скопировать код</button>
-      </div>
-      <div class="wait-status"><span class="spinner"></span><span id="waitText">Ждём второго игрока… Отправь другу ссылку.</span></div>
-      <button class="btn btn--ghost btn--small" id="btnCancelWait">← отмена</button>
-    </section>
-
-    <section class="screen screen--call" id="callScreen" hidden>
-      <div class="call-layout">
-        <div class="stage">
-          <video id="remoteVideo" autoplay playsinline></video>
-          <div class="stage-empty" id="stageEmpty">
-            <span class="stage-empty-ico">📡</span>
-            <p id="stageEmptyText">Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.</p>
-          </div>
-          <div class="stage-badge" id="stageBadge" hidden><span class="led led--green"></span> ЭКРАН В ЭФИРЕ</div>
-          <video id="localVideo" class="pip" autoplay playsinline muted hidden></video>
-          <div class="event-banner" id="eventBanner" hidden></div>
-        </div>
-        <aside class="side">
-          <div class="side-card">
-            <div class="side-head"><span class="led led--green" id="peerLed"></span><span id="peerName">Напарник</span></div>
-            <div class="meter-row"><span class="meter-label">его микрофон</span>
-              <div class="meter"><div class="meter-fill meter-fill--remote" id="meterRemote"></div></div></div>
-            <div class="meter-row"><span class="meter-label">твой микрофон</span>
-              <div class="meter"><div class="meter-fill meter-fill--local" id="meterLocal"></div></div></div>
-          </div>
-          <div class="side-card side-card--stats">
-            <h3 class="side-title">Телеметрия канала</h3>
-            <div class="stat"><div class="stat-top"><span>Разрешение</span><b id="statRes">—</b></div></div>
-            <div class="stat"><div class="stat-top"><span>FPS</span><b id="statFps">—</b></div><div class="stat-bar"><i id="barFps"></i></div></div>
-            <div class="stat"><div class="stat-top"><span>Битрейт</span><b id="statBitrate">—</b></div><div class="stat-bar"><i id="barBitrate"></i></div></div>
-            <div class="stat"><div class="stat-top"><span>Пинг (RTT)</span><b id="statRtt">—</b></div><div class="stat-bar"><i id="barRtt"></i></div></div>
-            <div class="stat"><div class="stat-top"><span>Джиттер</span><b id="statJitter">—</b></div></div>
-            <div class="stat"><div class="stat-top"><span>Потери пакетов</span><b id="statLoss">—</b></div><div class="stat-bar"><i id="barLoss"></i></div></div>
-          </div>
-          <div class="side-card side-card--tips">
-            <h3 class="side-title">Совет</h3>
-            <p id="tipText">При запуске демонстрации поставь в Chrome галочку
-              «Также делиться системным звуком» — друг услышит игру, а не только тебя.</p>
-          </div>
-        </aside>
-      </div>
-      <div class="dock">
-        <button class="dock-btn" id="btnMic" title="Включить / выключить микрофон">
-          <span class="dock-ico" id="icoMic">🎙</span><span class="dock-cap" id="capMic">микрофон</span></button>
-        <button class="dock-btn dock-btn--share" id="btnShare" title="Демонстрация экрана">
-          <span class="dock-ico">🖥</span><span class="dock-cap" id="capShare">демонстрация</span></button>
-        <div class="dock-quality">
-          <label for="qualitySelect">качество</label>
-          <select id="qualitySelect">
-            <option value="max">1080p · 60 fps · макс</option>
-            <option value="high" selected>1080p · 60 fps</option>
-            <option value="medium">720p · 45 fps</option>
-            <option value="eco">720p · 30 fps</option>
-          </select>
-        </div>
-        <button class="dock-btn" id="btnCopyCallLink" title="Скопировать ссылку на комнату">
-          <span class="dock-ico">🔗</span><span class="dock-cap">ссылка</span></button>
-        <button class="dock-btn dock-btn--leave" id="btnLeave" title="Покинуть комнату">
-          <span class="dock-ico">⏻</span><span class="dock-cap">выйти</span></button>
-      </div>
-    </section>
-  </main>
-
-  <footer class="foot">
-    <span>WebRTC P2P — видео идёт напрямую между устройствами</span>
-    <span class="foot-sep">•</span>
-    <span>сигналы через Firebase, сервера на твоём ПК нет</span>
-  </footer>
-
-  <div class="toast" id="toast" hidden></div>
-  <audio id="remoteAudio" autoplay playsinline></audio>
-  <div class="unsupported" id="unsupported" hidden>
-    Твой браузер не поддерживает WebRTC. Открой сайт в Chrome, Edge или Safari.
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">▶▶</span><span class="brand-name">ВТОРОЙ<span class="brand-accent">ИГРОК</span></span></div>
+  <div class="topbar-right">
+    <div class="net-pill" title="Связь с сигнальным каналом (Firebase)"><span class="led" id="netLed"></span><span id="netStatus">подключение…</span></div>
+    <div class="ping-pill" title="Задержка до напарника (RTT)"><span class="ping-label">PING</span><span id="pingValue">—</span></div>
   </div>
+</header>
 
-  <!-- Firebase (compat) — только «знакомство» устройств, видео мимо него -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-  <script src="public/app.js"></script>
+<main>
+  <section class="screen screen--lobby" id="lobbyScreen">
+    <div class="lobby-left">
+      <p class="overline">// кооперативная линия связи</p>
+      <h1 class="title">ИГРАЙ<br><span class="title-outline">ВМЕСТЕ</span><br>НА РАССТОЯНИИ</h1>
+      <p class="lead">Голосовой звонок и демонстрация экрана <b>напрямую</b> между твоим ПК и устройством друга. Видео не проходит через чужие серверы — поэтому качество и задержка как в локальной сети.</p>
+      <div class="route">
+        <div class="route-node"><span class="route-ico">🖥</span><span class="route-cap">твой ПК</span></div>
+        <div class="route-line"><span class="route-packet"></span><span class="route-packet"></span><span class="route-packet"></span><span class="route-cap-line">P2P · WebRTC · без посредников</span></div>
+        <div class="route-node"><span class="route-ico">📱</span><span class="route-cap">iPad друга</span></div>
+      </div>
+      <ul class="checks">
+        <li>До <b>1080p / 60 FPS</b>, битрейт переключается прямо во время звонка</li>
+        <li>Звук игры захватывается вместе с экраном</li>
+        <li>Живая телеметрия: пинг, FPS, битрейт, потери пакетов</li>
+      </ul>
+    </div>
+    <div class="lobby-right">
+      <div class="panel panel--create">
+        <div class="panel-tag">игрок 1</div>
+        <h2 class="panel-title">Создать комнату</h2>
+        <p class="panel-text">Ты за хоста: запускаешь игру и показываешь экран.</p>
+        <button class="btn btn--amber btn--big" id="btnCreate"><span class="btn-ico">⚡</span>Создать</button>
+      </div>
+      <div class="panel-divider"><span>или</span></div>
+      <div class="panel panel--join">
+        <div class="panel-tag panel-tag--cyan">игрок 2</div>
+        <h2 class="panel-title">Присоединиться</h2>
+        <p class="panel-text">Введи код из 4 символов, который прислал друг.</p>
+        <div class="join-row">
+          <input id="joinCode" class="code-input" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
+          <button class="btn btn--green" id="btnJoin">Войти</button>
+        </div>
+      </div>
+      <p class="lobby-error" id="lobbyError" hidden></p>
+      <p class="lobby-hint">На ПК открывай в <b>Chrome / Edge</b>, на iPad — в <b>Safari</b>.</p>
+    </div>
+  </section>
+
+  <section class="screen screen--wait" id="waitScreen" hidden>
+    <p class="overline">// комната готова</p>
+    <h2 class="wait-title">Код комнаты</h2>
+    <div class="room-code" id="roomCodeDisplay"><span>·</span><span>·</span><span>·</span><span>·</span></div>
+    <div class="wait-actions">
+      <button class="btn btn--amber" id="btnCopyLink">🔗 Скопировать ссылку</button>
+      <button class="btn btn--ghost" id="btnCopyCode">Скопировать код</button>
+    </div>
+    <div class="wait-status"><span class="spinner"></span><span id="waitText">Ждём второго игрока… Отправь другу ссылку.</span></div>
+    <button class="btn btn--ghost btn--small" id="btnCancelWait">← отмена</button>
+  </section>
+
+  <section class="screen screen--call" id="callScreen" hidden>
+    <div class="call-layout">
+      <div class="stage">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <div class="stage-empty" id="stageEmpty"><span class="stage-empty-ico">📡</span><p id="stageEmptyText">Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.</p></div>
+        <div class="stage-badge" id="stageBadge" hidden><span class="led led--green"></span> ЭКРАН В ЭФИРЕ</div>
+        <video id="localVideo" class="pip" autoplay playsinline muted hidden></video>
+        <div class="event-banner" id="eventBanner" hidden></div>
+      </div>
+      <aside class="side">
+        <div class="side-card">
+          <div class="side-head"><span class="led led--green" id="peerLed"></span><span id="peerName">Напарник</span></div>
+          <div class="meter-row"><span class="meter-label">его микрофон</span><div class="meter"><div class="meter-fill meter-fill--remote" id="meterRemote"></div></div></div>
+          <div class="meter-row"><span class="meter-label">твой микрофон</span><div class="meter"><div class="meter-fill meter-fill--local" id="meterLocal"></div></div></div>
+        </div>
+        <div class="side-card side-card--stats">
+          <h3 class="side-title">Телеметрия канала</h3>
+          <div class="stat"><div class="stat-top"><span>Разрешение</span><b id="statRes">—</b></div></div>
+          <div class="stat"><div class="stat-top"><span>FPS</span><b id="statFps">—</b></div><div class="stat-bar"><i id="barFps"></i></div></div>
+          <div class="stat"><div class="stat-top"><span>Битрейт</span><b id="statBitrate">—</b></div><div class="stat-bar"><i id="barBitrate"></i></div></div>
+          <div class="stat"><div class="stat-top"><span>Пинг (RTT)</span><b id="statRtt">—</b></div><div class="stat-bar"><i id="barRtt"></i></div></div>
+          <div class="stat"><div class="stat-top"><span>Джиттер</span><b id="statJitter">—</b></div></div>
+          <div class="stat"><div class="stat-top"><span>Потери пакетов</span><b id="statLoss">—</b></div><div class="stat-bar"><i id="barLoss"></i></div></div>
+        </div>
+        <div class="side-card side-card--tips"><h3 class="side-title">Совет</h3><p id="tipText">При запуске демонстрации поставь в Chrome галочку «Также делиться системным звуком» — друг услышит игру, а не только тебя.</p></div>
+      </aside>
+    </div>
+    <div class="dock">
+      <button class="dock-btn" id="btnMic" title="Включить / выключить микрофон"><span class="dock-ico" id="icoMic">🎙</span><span class="dock-cap" id="capMic">микрофон</span></button>
+      <button class="dock-btn dock-btn--share" id="btnShare" title="Демонстрация экрана"><span class="dock-ico">🖥</span><span class="dock-cap" id="capShare">демонстрация</span></button>
+      <div class="dock-quality"><label for="qualitySelect">качество</label>
+        <select id="qualitySelect">
+          <option value="max">1080p · 60 fps · макс</option>
+          <option value="high" selected>1080p · 60 fps</option>
+          <option value="medium">720p · 45 fps</option>
+          <option value="eco">720p · 30 fps</option>
+        </select>
+      </div>
+      <button class="dock-btn" id="btnCopyCallLink" title="Скопировать ссылку на комнату"><span class="dock-ico">🔗</span><span class="dock-cap">ссылка</span></button>
+      <button class="dock-btn dock-btn--leave" id="btnLeave" title="Покинуть комнату"><span class="dock-ico">⏻</span><span class="dock-cap">выйти</span></button>
+    </div>
+  </section>
+</main>
+
+<footer class="foot"><span>WebRTC P2P — видео идёт напрямую между устройствами</span><span class="foot-sep">•</span><span>сигналы через Firebase, сервера на твоём ПК нет</span></footer>
+
+<div class="toast" id="toast" hidden></div>
+<audio id="remoteAudio" autoplay playsinline></audio>
+<div class="unsupported" id="unsupported">Твой браузер не поддерживает WebRTC. Открой сайт в Chrome, Edge или Safari.</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+'use strict';
+/* ВТОРОЙ ИГРОК — монолит v2: всё встроено, без внешних app.js/style.css. */
+console.log('[ВТОРОЙ ИГРОК] сборка: монолит v2');
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
+  authDomain: "two-players-945a2.firebaseapp.com",
+  databaseURL: "https://two-players-945a2-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "two-players-945a2",
+  storageBucket: "two-players-945a2.firebasestorage.app",
+  messagingSenderId: "947219222314",
+  appId: "1:947219222314:web:c67fff24831d3945d61853"
+};
+const hasFirebase = (typeof firebase !== 'undefined');
+let db = null, SV = null;
+if (hasFirebase) {
+  try { firebase.initializeApp(firebaseConfig); db = firebase.database(); SV = firebase.database.ServerValue.TIMESTAMP; }
+  catch (e) { console.warn('firebase init failed:', e); }
+}
+
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: ['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject', credential: 'openrelayproject' }
+  ],
+  iceCandidatePoolSize: 10
+};
+const QUALITY = {
+  max:{bitrate:12000000,fps:60,label:'1080p60 макс'}, high:{bitrate:8000000,fps:60,label:'1080p60'},
+  medium:{bitrate:4000000,fps:45,label:'720p45'}, eco:{bitrate:2000000,fps:30,label:'720p30'}
+};
+
+let roomCode=null,isHost=false,myId=null,peerId=null,pc=null;
+let micStream=null,screenStream=null,screenTracks=[];
+let makingOffer=false,statsTimer=null,prevVideo=null;
+let remoteMix=new MediaStream();
+let audioCtx=null,localAnalyser=null,remoteAnalyser=null,metersRAF=null,meterBuf=null;
+let membersRef=null,signalsRef=null,myMemberRef=null;
+
+const $=(id)=>document.getElementById(id);
+const el={
+  netLed:$('netLed'),netStatus:$('netStatus'),pingValue:$('pingValue'),
+  lobbyScreen:$('lobbyScreen'),btnCreate:$('btnCreate'),joinCode:$('joinCode'),btnJoin:$('btnJoin'),lobbyError:$('lobbyError'),
+  waitScreen:$('waitScreen'),roomCodeDisplay:$('roomCodeDisplay'),btnCopyLink:$('btnCopyLink'),btnCopyCode:$('btnCopyCode'),
+  waitText:$('waitText'),btnCancelWait:$('btnCancelWait'),callScreen:$('callScreen'),
+  remoteVideo:$('remoteVideo'),stageEmpty:$('stageEmpty'),stageEmptyText:$('stageEmptyText'),stageBadge:$('stageBadge'),
+  localVideo:$('localVideo'),eventBanner:$('eventBanner'),peerLed:$('peerLed'),peerName:$('peerName'),
+  meterRemote:$('meterRemote'),meterLocal:$('meterLocal'),statRes:$('statRes'),statFps:$('statFps'),barFps:$('barFps'),
+  statBitrate:$('statBitrate'),barBitrate:$('barBitrate'),statRtt:$('statRtt'),barRtt:$('barRtt'),
+  statJitter:$('statJitter'),statLoss:$('statLoss'),barLoss:$('barLoss'),
+  btnMic:$('btnMic'),icoMic:$('icoMic'),capMic:$('capMic'),btnShare:$('btnShare'),capShare:$('capShare'),qualitySelect:$('qualitySelect'),
+  btnCopyCallLink:$('btnCopyCallLink'),btnLeave:$('btnLeave'),toast:$('toast'),remoteAudio:$('remoteAudio'),unsupported:$('unsupported')
+};
+
+function genId(){try{return crypto.randomUUID();}catch{return 'p'+Math.random().toString(36).slice(2)+Date.now().toString(36);}}
+function genCode(){const c='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<4;i++)r+=c[Math.floor(Math.random()*c.length)];return r;}
+function showScreen(n){el.lobbyScreen.hidden=n!=='lobby';el.waitScreen.hidden=n!=='wait';el.callScreen.hidden=n!=='call';}
+let toastTimer=null;
+function toast(m){if(!el.toast)return;el.toast.textContent=m;el.toast.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{el.toast.hidden=true;},2800);}
+let bannerTimer=null;
+function banner(m,k){if(!el.eventBanner)return;el.eventBanner.textContent=m;el.eventBanner.className='event-banner event-banner--'+(k||'good');el.eventBanner.hidden=false;clearTimeout(bannerTimer);bannerTimer=setTimeout(()=>{el.eventBanner.hidden=true;},3500);}
+async function copyText(t,ok){try{await navigator.clipboard.writeText(t);}catch{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();}toast(ok);}
+function roomLink(){return location.origin+location.pathname+'?room='+roomCode;}
+function lobbyError(m){if(!el.lobbyError)return;el.lobbyError.textContent=m;el.lobbyError.hidden=false;el.lobbyError.style.animation='none';void el.lobbyError.offsetWidth;el.lobbyError.style.animation='';}
+
+function watchConnection(){
+  if(!db){if(el.netLed)el.netLed.className='led led--amber';if(el.netStatus)el.netStatus.textContent='без базы';return;}
+  db.ref('.info/connected').on('value',(s)=>{
+    if(s.val()===true){el.netLed.className='led led--green';el.netStatus.textContent='на связи';}
+    else{el.netLed.className='led led--red';el.netStatus.textContent='нет связи';el.pingValue.textContent='—';}
+  });
+}
+function pushSignal(to,type,extra){if(!db||!roomCode||!myId)return;db.ref('rooms/'+roomCode+'/signals').push(Object.assign({from:myId,to:to,type:type,ts:SV},extra||{}));}
+function subscribeSignals(){if(!db)return;signalsRef=db.ref('rooms/'+roomCode+'/signals');signalsRef.on('child_added',(snap)=>{const sig=snap.val();if(!sig){snap.ref.remove();return;}if(sig.from===myId){snap.ref.remove();return;}if(sig.to!==myId&&sig.to!=='*')return;if(sig.type==='offer'||sig.type==='answer'||sig.type==='candidate')handleSignal(sig.from,sig);snap.ref.remove();});}
+function subscribeMembers(){if(!db)return;membersRef=db.ref('rooms/'+roomCode+'/members');membersRef.on('child_added',(snap)=>{if(snap.key===myId)return;if(!peerId)peerId=snap.key;if(isHost)onPeerArrived();});membersRef.on('child_changed',(snap)=>{if(snap.key===peerId)applyPeerState(snap.val());});membersRef.on('child_removed',(snap)=>{if(snap.key===peerId)onPeerLeft();});}
+async function writeMember(){if(!db)return;myMemberRef=db.ref('rooms/'+roomCode+'/members/'+myId);await myMemberRef.set({mic:true,sharing:false,ts:SV});myMemberRef.onDisconnect().remove();}
+
+async function createRoom(){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';myId=genId();isHost=true;let code=genCode();for(let i=0;i<12;i++){const s=await db.ref('rooms/'+code).get();if(!s.exists())break;code=genCode();}roomCode=code;renderRoomCode(code);showScreen('wait');await writeMember();subscribeMembers();subscribeSignals();}
+async function joinRoom(code){if(!db)throw 'Сигнальный канал недоступен. Обнови страницу (Ctrl+Shift+R).';const rs=await db.ref('rooms/'+code).get();if(!rs.exists())throw 'Комната не найдена. Проверь код.';const ms=await db.ref('rooms/'+code+'/members').get();if(ms.exists()&&Object.keys(ms.val()||{}).length>=2)throw 'В комнате уже два человека.';myId=genId();isHost=false;roomCode=code;await writeMember();subscribeMembers();subscribeSignals();enterCall();banner('Ты в комнате. Соединяемся...','good');sendState();}
+function renderRoomCode(code){el.roomCodeDisplay.innerHTML='';for(const ch of code){const s=document.createElement('span');s.textContent=ch;el.roomCodeDisplay.appendChild(s);}}
+
+async function ensureMic(){if(micStream)return micStream;if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){throw new Error('NO_MEDIA');}micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},video:false});startLocalMeter(micStream);return micStream;}
+
+el.btnCreate.addEventListener('click',async()=>{try{el.btnCreate.disabled=true;el.lobbyError.hidden=true;await ensureMic();await createRoom();}catch(err){el.btnCreate.disabled=false;if(err&&err.name==='NotAllowedError')lobbyError('Ты запретил микрофон. Разреши его в браузере и нажми «Создать» снова.');else if(err&&err.message==='NO_MEDIA')lobbyError('Этот браузер не даёт доступ к микрофону. Открой сайт в Chrome, Edge или Safari.');else if(typeof err==='string')lobbyError(err);else lobbyError('Не удалось создать комнату. Обнови страницу (Ctrl+Shift+R) и попробуй снова.');}});
+el.btnJoin.addEventListener('click',joinByCode);
+el.joinCode.addEventListener('keydown',(e)=>{if(e.key==='Enter')joinByCode();});
+el.joinCode.addEventListener('input',()=>{el.joinCode.value=el.joinCode.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);});
+async function joinByCode(){const code=el.joinCode.value.trim();if(code.length!==4)return lobbyError('Код комнаты - 4 символа.');try{el.btnJoin.disabled=true;el.lobbyError.hidden=true;await ensureMic();await joinRoom(code);el.btnJoin.disabled=false;}catch(err){el.btnJoin.disabled=false;if(err&&err.name==='NotAllowedError')lobbyError('Ты запретил микрофон. Разреши его и нажми «Войти» снова.');else if(err&&err.message==='NO_MEDIA')lobbyError('Этот браузер не даёт доступ к микрофону. Открой сайт в Chrome, Edge или Safari.');else lobbyError(typeof err==='string'?err:'Нет доступа к микрофону. Разреши его в браузере.');}}
+el.btnCopyLink.addEventListener('click',()=>copyText(roomLink(),'Ссылка скопирована - отправь другу'));
+el.btnCopyCode.addEventListener('click',()=>copyText(roomCode,'Код комнаты скопирован'));
+el.btnCancelWait.addEventListener('click',leaveAll);
+
+function enterCall(){showScreen('call');el.stageEmpty.hidden=false;el.stageEmptyText.textContent=isHost?'Напарник на связи. Нажми «Демонстрация», чтобы показать свой экран.':'Ты подключился. Как только друг включит демонстрацию - его экран появится здесь.';el.peerLed.className='led led--green';startStats();}
+
+function ensurePC(){if(pc)return pc;pc=new RTCPeerConnection(RTC_CONFIG);if(micStream)micStream.getAudioTracks().forEach((t)=>pc.addTrack(t,micStream));if(screenStream){const v=screenStream.getVideoTracks()[0];if(v)pc.addTrack(v,screenStream);const a=screenStream.getAudioTracks()[0];if(a)pc.addTrack(a,screenStream);}pc.onicecandidate=(e)=>{if(e.candidate&&peerId)pushSignal(peerId,'candidate',{candidate:e.candidate});};pc.ontrack=(e)=>{remoteMix.addTrack(e.track);if(e.track.kind==='video'){el.remoteVideo.srcObject=remoteMix;el.remoteVideo.muted=true;el.remoteVideo.play().catch(()=>{});el.stageEmpty.hidden=true;}else{el.remoteAudio.srcObject=remoteMix;el.remoteAudio.play().catch(()=>{});startRemoteMeter(remoteMix);}e.track.onended=()=>{remoteMix.removeTrack(e.track);if(e.track.kind==='video'){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник остановил демонстрацию.';}};};pc.onconnectionstatechange=()=>{if(!pc)return;const s=pc.connectionState;if(s==='connected'){el.peerLed.className='led led--green';banner('Прямое соединение установлено','good');applyQuality();}else if(s==='disconnected'){el.peerLed.className='led led--amber';}else if(s==='failed'){el.peerLed.className='led led--red';banner('Связь прервалась - переподключаемся...','warn');pc.restartIce();}};pc.onnegotiationneeded=async()=>{if(!peerId)return;try{makingOffer=true;await pc.setLocalDescription(await pc.createOffer());pushSignal(peerId,'offer',{sdp:pc.localDescription});}catch(err){console.warn('offer error',err);}finally{makingOffer=false;}};return pc;}
+async function handleSignal(fromId,msg){if(!peerId)peerId=fromId;if(!pc)ensurePC();try{if(msg.type==='offer'){const col=makingOffer||pc.signalingState!=='stable';if(col&&isHost)return;await pc.setRemoteDescription(msg.sdp);await pc.setLocalDescription(await pc.createAnswer());pushSignal(fromId,'answer',{sdp:pc.localDescription});}else if(msg.type==='answer'){await pc.setRemoteDescription(msg.sdp);}else if(msg.type==='candidate'){try{await pc.addIceCandidate(msg.candidate);}catch{}}}catch(err){console.warn('signal error',err);}}
+function onPeerArrived(){enterCall();ensurePC();banner('Напарник подключился','good');sendState();}
+function onPeerLeft(){peerId=null;if(pc){pc.close();pc=null;}remoteMix.getTracks().forEach((t)=>remoteMix.removeTrack(t));el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.peerLed.className='led led--red';el.meterRemote.style.width='0%';if(isHost){el.stageEmpty.hidden=false;el.stageEmptyText.textContent='Напарник вышел. Комната жива - ждём его возвращения...';banner('Напарник отключился. Он может зайти по тому же коду.','warn');}else{banner('Хост закрыл комнату','warn');setTimeout(()=>{leaveAll();lobbyError('Хост закрыл комнату. Пусть создаст новую и пришлёт код.');},2200);}}
+
+el.btnShare.addEventListener('click',async()=>{if(screenStream)return stopScreenShare(false);if(!navigator.mediaDevices||!navigator.mediaDevices.getDisplayMedia)return toast('Демонстрация экрана недоступна в этом браузере. Открой сайт в Chrome или Edge.');try{el.btnShare.disabled=true;screenStream=await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor',frameRate:{ideal:60,max:60},width:{ideal:1920},height:{ideal:1080}},audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,sampleRate:48000},systemAudio:'include',selfBrowserSurface:'exclude',preferCurrentTab:false});el.btnShare.disabled=false;const vTrack=screenStream.getVideoTracks()[0];vTrack.contentHint='detail';vTrack.addEventListener('ended',()=>stopScreenShare(true));screenTracks=screenStream.getTracks();el.localVideo.srcObject=screenStream;el.localVideo.hidden=false;if(pc){pc.addTrack(vTrack,screenStream);const aTrack=screenStream.getAudioTracks()[0];if(aTrack)pc.addTrack(aTrack,screenStream);}el.btnShare.classList.add('is-live');el.capShare.textContent='в эфире';el.stageBadge.hidden=false;applyQuality();sendState();toast(screenStream.getAudioTracks().length?'Экран в эфире - вместе со звуком игры':'Экран в эфире (без системного звука - отметь галочку в окне захвата)');}catch(err){el.btnShare.disabled=false;screenStream=null;if(err&&err.name!=='NotAllowedError')toast('Не удалось начать демонстрацию');}});
+function stopScreenShare(silent){if(screenStream){screenStream.getTracks().forEach((t)=>t.stop());screenStream=null;}if(pc&&screenTracks.length){pc.getSenders().forEach((s)=>{if(s.track&&screenTracks.includes(s.track))pc.removeTrack(s);});}screenTracks=[];el.localVideo.srcObject=null;el.localVideo.hidden=true;el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';el.stageBadge.hidden=true;sendState();if(!silent)toast('Демонстрация остановлена');}
+
+async function applyQuality(){if(!pc)return;const p=QUALITY[el.qualitySelect.value]||QUALITY.high;for(const s of pc.getSenders()){if(!s.track||s.track.kind!=='video')continue;const par=s.getParameters();if(!par.encodings||par.encodings.length===0)par.encodings=[{}];par.encodings[0].maxBitrate=p.bitrate;par.encodings[0].maxFramerate=p.fps;try{await s.setParameters(par);}catch(e){console.warn(e);}}}
+el.qualitySelect.addEventListener('change',()=>{applyQuality();const p=QUALITY[el.qualitySelect.value];if(p)toast('Качество: '+p.label);});
+
+el.btnMic.addEventListener('click',()=>{if(!micStream)return;const t=micStream.getAudioTracks()[0];if(!t)return;t.enabled=!t.enabled;el.btnMic.classList.toggle('is-muted',!t.enabled);el.icoMic.textContent=t.enabled?'🎙':'';el.capMic.textContent=t.enabled?'микрофон':'выкл';sendState();});
+function sendState(){if(!myMemberRef)return;const t=micStream?micStream.getAudioTracks()[0]:null;myMemberRef.update({mic:t?t.enabled:true,sharing:!!screenStream});}
+function applyPeerState(st){el.peerName.textContent=(st&&st.mic===false)?'Напарник (микрофон выкл)':'Напарник';}
+
+el.btnCopyCallLink.addEventListener('click',()=>copyText(roomLink(),'Ссылка на комнату скопирована'));
+el.btnLeave.addEventListener('click',leaveAll);
+window.addEventListener('beforeunload',()=>{try{if(myMemberRef)myMemberRef.remove();}catch{}if(pc)pc.close();});
+
+function leaveAll(){stopScreenShare(true);if(micStream){micStream.getTracks().forEach((t)=>t.stop());micStream=null;}if(pc){pc.close();pc=null;}if(statsTimer){clearInterval(statsTimer);statsTimer=null;}stopMeters();try{if(membersRef)membersRef.off();}catch{}try{if(signalsRef)signalsRef.off();}catch{}try{if(myMemberRef){myMemberRef.remove();myMemberRef=null;}}catch{}try{if(isHost&&roomCode&&db)db.ref('rooms/'+roomCode).remove();}catch{}membersRef=null;signalsRef=null;remoteMix=new MediaStream();el.remoteVideo.srcObject=null;el.remoteAudio.srcObject=null;el.localVideo.srcObject=null;el.localVideo.hidden=true;el.btnShare.classList.remove('is-live');el.capShare.textContent='демонстрация';el.btnMic.classList.remove('is-muted');el.icoMic.textContent='🎙';el.capMic.textContent='микрофон';el.stageBadge.hidden=true;el.eventBanner.hidden=true;resetStatsUI();roomCode=null;peerId=null;isHost=false;myId=null;prevVideo=null;showScreen('lobby');}
+
+function startStats(){if(statsTimer)clearInterval(statsTimer);prevVideo=null;resetStatsUI();statsTimer=setInterval(collectStats,1000);}
+async function collectStats(){if(!pc)return;let video=null,remote=null;try{const rep=await pc.getStats();rep.forEach((r)=>{if(r.type==='outbound-rtp'&&r.kind==='video'&&!r.isRemote){if(!video||r.bytesSent>video.bytesSent)video=r;}if(r.type==='remote-inbound-rtp'&&r.kind==='video')remote=r;});}catch{return;}if(video){const now=performance.now();if(prevVideo&&now>prevVideo.t){const dt=(now-prevVideo.t)/1000;const bps=((video.bytesSent-prevVideo.bytes)*8)/dt;el.statBitrate.textContent=fmtBitrate(bps);setBar(el.barBitrate,(bps/12000000)*100);}prevVideo={t:now,bytes:video.bytesSent};if(video.frameWidth&&video.frameHeight)el.statRes.textContent=video.frameWidth+'x'+video.frameHeight;const fps=video.framesPerSecond||0;el.statFps.textContent=fps?String(Math.round(fps)):'—';setBar(el.barFps,(fps/60)*100,fps>0&&fps<24,fps>0&&fps<12);}if(remote){if(remote.roundTripTime!=null){const ms=Math.round(remote.roundTripTime*1000);el.statRtt.textContent=ms+' мс';el.pingValue.textContent=ms+' мс';setBar(el.barRtt,(ms/300)*100,ms>80,ms>150);}if(remote.jitter!=null)el.statJitter.textContent=(remote.jitter*1000).toFixed(1)+' мс';if(remote.packetsLost!=null&&video&&video.packetsSent>0){const pct=(remote.packetsLost/video.packetsSent)*100;el.statLoss.textContent=pct===0?'0 %':pct.toFixed(2)+' %';setBar(el.barLoss,Math.min(100,pct*20),pct>0.3,pct>1);}}}
+function setBar(b,p,w,bad){b.style.width=Math.max(2,Math.min(100,p))+'%';b.className=bad?'bad':(w?'warn':'');}
+function fmtBitrate(b){if(b>=1000000)return(b/1000000).toFixed(1)+' Мбит/с';return Math.round(b/1000)+' Кбит/с';}
+function resetStatsUI(){el.statRes.textContent='—';el.statFps.textContent='—';el.statBitrate.textContent='—';el.statRtt.textContent='—';el.statJitter.textContent='—';el.statLoss.textContent='—';el.pingValue.textContent='—';[el.barFps,el.barBitrate,el.barRtt,el.barLoss].forEach((b)=>{b.style.width='0%';b.className='';});}
+
+function ensureAudioCtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});return audioCtx;}
+function makeAnalyser(st){const ctx=ensureAudioCtx();const src=ctx.createMediaStreamSource(st);const an=ctx.createAnalyser();an.fftSize=512;src.connect(an);return an;}
+function startLocalMeter(st){try{localAnalyser=makeAnalyser(st);}catch{localAnalyser=null;}runMeters();}
+function startRemoteMeter(st){try{remoteAnalyser=makeAnalyser(st);}catch{remoteAnalyser=null;}runMeters();}
+function meterLevel(an){if(!an)return 0;if(!meterBuf||meterBuf.length!==an.frequencyBinCount)meterBuf=new Uint8Array(an.frequencyBinCount);an.getByteTimeDomainData(meterBuf);let s=0;for(let i=0;i<meterBuf.length;i++){const v=(meterBuf[i]-128)/128;s+=v*v;}return Math.min(100,Math.sqrt(s/meterBuf.length)*300);}
+function runMeters(){if(metersRAF)return;const loop=()=>{el.meterLocal.style.width=meterLevel(localAnalyser)+'%';el.meterRemote.style.width=meterLevel(remoteAnalyser)+'%';metersRAF=requestAnimationFrame(loop);};loop();}
+function stopMeters(){if(metersRAF)cancelAnimationFrame(metersRAF);metersRAF=null;localAnalyser=null;remoteAnalyser=null;el.meterLocal.style.width='0%';el.meterRemote.style.width='0%';}
+
+(function init(){
+  if(el.unsupported)el.unsupported.style.display='none';   // оверлей ВЫКЛЮЧЕН навсегда
+  watchConnection();
+  const urlRoom=new URLSearchParams(location.search).get('room');
+  if(urlRoom){el.joinCode.value=urlRoom.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4);if(el.joinCode.value.length===4)toast('Код подставлен из ссылки - нажми «Войти»');}
+})();
+</script>
 </body>
 </html>
