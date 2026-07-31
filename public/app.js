@@ -1,5 +1,18 @@
-/* ВТОРОЙ ИГРОК - клиент: WebRTC P2P, голос + демонстрация экрана. */
+/* ВТОРОЙ ИГРОК - клиент: WebRTC P2P + Firebase Realtime Database (сигналы). */
 'use strict';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCWOrWHIkyYj13vU9B2IEvdLsXs7jbChyA",
+  authDomain: "two-players-945a2.firebaseapp.com",
+  databaseURL: "https://two-players-945a2-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "two-players-945a2",
+  storageBucket: "two-players-945a2.firebasestorage.app",
+  messagingSenderId: "947219222314",
+  appId: "1:947219222314:web:c67fff24831d3945d61853"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const SV = firebase.database.ServerValue.TIMESTAMP;
 
 const RTC_CONFIG = {
   iceServers: [
@@ -18,11 +31,12 @@ const QUALITY = {
   eco:    { bitrate: 2000000,  fps: 30, label: '720p30' }
 };
 
-let socket = null, roomCode = null, isHost = false, pc = null, peerId = null;
+let roomCode = null, isHost = false, myId = null, peerId = null, pc = null;
 let micStream = null, screenStream = null, screenTracks = [];
 let makingOffer = false, statsTimer = null, prevVideo = null;
 let remoteMix = new MediaStream();
 let audioCtx = null, localAnalyser = null, remoteAnalyser = null, metersRAF = null, meterBuf = null;
+let membersRef = null, signalsRef = null, myMemberRef = null;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -48,20 +62,28 @@ const el = {
   toast: $('toast'), remoteAudio: $('remoteAudio'), unsupported: $('unsupported')
 };
 
-function showScreen(name) {
-  el.lobbyScreen.hidden = name !== 'lobby';
-  el.waitScreen.hidden  = name !== 'wait';
-  el.callScreen.hidden  = name !== 'call';
+function genId() {
+  try { return crypto.randomUUID(); }
+  catch { return 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+}
+function genCode() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for (let i = 0; i < 4; i++) c += chars[Math.floor(Math.random() * chars.length)];
+  return c;
 }
 
+function showScreen(name) {
+  el.lobbyScreen.hidden = name !== 'lobby';
+  el.waitScreen.hidden = name !== 'wait';
+  el.callScreen.hidden = name !== 'call';
+}
 let toastTimer = null;
 function toast(msg) {
-  el.toast.textContent = msg;
-  el.toast.hidden = false;
+  el.toast.textContent = msg; el.toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.toast.hidden = true; }, 2600);
 }
-
 let bannerTimer = null;
 function banner(msg, kind) {
   el.eventBanner.textContent = msg;
@@ -70,7 +92,6 @@ function banner(msg, kind) {
   clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => { el.eventBanner.hidden = true; }, 3500);
 }
-
 async function copyText(text, okMsg) {
   try { await navigator.clipboard.writeText(text); }
   catch {
@@ -80,41 +101,106 @@ async function copyText(text, okMsg) {
   }
   toast(okMsg);
 }
-
 function roomLink() { return location.origin + location.pathname + '?room=' + roomCode; }
-
 function lobbyError(msg) {
-  el.lobbyError.textContent = msg;
-  el.lobbyError.hidden = false;
+  el.lobbyError.textContent = msg; el.lobbyError.hidden = false;
   el.lobbyError.style.animation = 'none';
   void el.lobbyError.offsetWidth;
   el.lobbyError.style.animation = '';
 }
 
-function initSocket() {
-  socket = io({ reconnectionAttempts: 15 });
-  socket.on('connect', () => {
-    el.netLed.className = 'led led--green';
-    el.netStatus.textContent = 'на связи';
+// ---------- Индикатор связи с Firebase ----------
+function watchConnection() {
+  db.ref('.info/connected').on('value', (s) => {
+    if (s.val() === true) {
+      el.netLed.className = 'led led--green';
+      el.netStatus.textContent = 'на связи';
+    } else {
+      el.netLed.className = 'led led--red';
+      el.netStatus.textContent = 'нет связи';
+      el.pingValue.textContent = '—';
+    }
   });
-  socket.on('disconnect', () => {
-    el.netLed.className = 'led led--red';
-    el.netStatus.textContent = 'нет связи';
-    el.pingValue.textContent = '—';
-  });
-  setInterval(async () => {
-    if (!socket || !socket.connected) return;
-    const t0 = performance.now();
-    try {
-      await fetch('/health', { cache: 'no-store' });
-      el.pingValue.textContent = Math.round(performance.now() - t0) + ' мс';
-    } catch { el.pingValue.textContent = '—'; }
-  }, 4000);
+}
 
-  socket.on('peer-joined', (id) => { peerId = id; onPeerArrived(); });
-  socket.on('rtc-signal', (fromId, msg) => handleSignal(fromId, msg));
-  socket.on('peer-state', (id, state) => applyPeerState(state));
-  socket.on('peer-left', () => onPeerLeft());
+// ---------- Сигнальный слой (Firebase) ----------
+function pushSignal(to, type, extra) {
+  if (!roomCode || !myId) return;
+  db.ref('rooms/' + roomCode + '/signals').push(
+    Object.assign({ from: myId, to: to, type: type, ts: SV }, extra || {})
+  );
+}
+function subscribeSignals() {
+  signalsRef = db.ref('rooms/' + roomCode + '/signals');
+  signalsRef.on('child_added', (snap) => {
+    const sig = snap.val();
+    if (!sig) { snap.ref.remove(); return; }
+    if (sig.from === myId) { snap.ref.remove(); return; }     // своё - выбросили
+    if (sig.to !== myId && sig.to !== '*') return;            // не нам
+    if (sig.type === 'offer' || sig.type === 'answer' || sig.type === 'candidate') {
+      handleSignal(sig.from, sig);
+    }
+    snap.ref.remove();                                        // база не растёт
+  });
+}
+function subscribeMembers() {
+  membersRef = db.ref('rooms/' + roomCode + '/members');
+  membersRef.on('child_added', (snap) => {
+    if (snap.key === myId) return;
+    if (!peerId) peerId = snap.key;
+    if (isHost) onPeerArrived();                              // хост стартует по приходу гостя
+  });
+  membersRef.on('child_changed', (snap) => {
+    if (snap.key === peerId) applyPeerState(snap.val());
+  });
+  membersRef.on('child_removed', (snap) => {
+    if (snap.key === peerId) onPeerLeft();
+  });
+}
+async function writeMember() {
+  myMemberRef = db.ref('rooms/' + roomCode + '/members/' + myId);
+  await myMemberRef.set({ mic: true, sharing: false, ts: SV });
+  myMemberRef.onDisconnect().remove();                        // закрыл вкладку - исчез
+}
+
+// ---------- Комнаты ----------
+async function createRoom() {
+  myId = genId(); isHost = true;
+  let code = genCode();
+  for (let i = 0; i < 12; i++) {                              // уникальность кода
+    const s = await db.ref('rooms/' + code).get();
+    if (!s.exists()) break;
+    code = genCode();
+  }
+  roomCode = code;
+  renderRoomCode(code);
+  showScreen('wait');
+  await writeMember();
+  subscribeMembers();
+  subscribeSignals();
+}
+async function joinRoom(code) {
+  const roomSnap = await db.ref('rooms/' + code).get();
+  if (!roomSnap.exists()) throw 'Комната не найдена. Проверь код.';
+  const mSnap = await db.ref('rooms/' + code + '/members').get();
+  if (mSnap.exists() && Object.keys(mSnap.val() || {}).length >= 2) {
+    throw 'В комнате уже два человека.';
+  }
+  myId = genId(); isHost = false; roomCode = code;
+  await writeMember();
+  subscribeMembers();
+  subscribeSignals();
+  enterCall();
+  banner('Ты в комнате. Соединяемся...', 'good');
+  sendState();
+}
+
+function renderRoomCode(code) {
+  el.roomCodeDisplay.innerHTML = '';
+  for (const ch of code) {
+    const s = document.createElement('span'); s.textContent = ch;
+    el.roomCodeDisplay.appendChild(s);
+  }
 }
 
 async function ensureMic() {
@@ -131,54 +217,28 @@ el.btnCreate.addEventListener('click', async () => {
   try {
     el.btnCreate.disabled = true;
     await ensureMic();
-    if (!socket.connected) socket.connect();
-    socket.emit('create-room', (res) => {
-      el.btnCreate.disabled = false;
-      if (!res || !res.ok) return lobbyError('Не удалось создать комнату. Перезагрузи страницу.');
-      roomCode = res.code;
-      isHost = true;
-      renderRoomCode(res.code);
-      showScreen('wait');
-    });
+    await createRoom();
   } catch {
     el.btnCreate.disabled = false;
     lobbyError('Нет доступа к микрофону. Разреши доступ в браузере и попробуй снова.');
   }
 });
-
 el.btnJoin.addEventListener('click', joinByCode);
 el.joinCode.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinByCode(); });
 el.joinCode.addEventListener('input', () => {
   el.joinCode.value = el.joinCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
 });
-
 async function joinByCode() {
   const code = el.joinCode.value.trim();
   if (code.length !== 4) return lobbyError('Код комнаты - 4 символа.');
   try {
     el.btnJoin.disabled = true;
     await ensureMic();
-    if (!socket.connected) socket.connect();
-    socket.emit('join-room', code, (res) => {
-      el.btnJoin.disabled = false;
-      if (!res || !res.ok) return lobbyError(res ? res.error : 'Сервер не отвечает.');
-      roomCode = res.code;
-      isHost = false;
-      enterCall();
-      banner('Ты в комнате. Соединяемся...', 'good');
-    });
-  } catch {
+    await joinRoom(code);
     el.btnJoin.disabled = false;
-    lobbyError('Нет доступа к микрофону. Разреши доступ в браузере и попробуй снова.');
-  }
-}
-
-function renderRoomCode(code) {
-  el.roomCodeDisplay.innerHTML = '';
-  for (const ch of code) {
-    const s = document.createElement('span');
-    s.textContent = ch;
-    el.roomCodeDisplay.appendChild(s);
+  } catch (err) {
+    el.btnJoin.disabled = false;
+    lobbyError(typeof err === 'string' ? err : 'Нет доступа к микрофону. Разреши доступ в браузере.');
   }
 }
 
@@ -196,22 +256,19 @@ function enterCall() {
   startStats();
 }
 
+// ---------- WebRTC ----------
 function ensurePC() {
   if (pc) return pc;
   pc = new RTCPeerConnection(RTC_CONFIG);
 
   if (micStream) micStream.getAudioTracks().forEach((t) => pc.addTrack(t, micStream));
   if (screenStream) {
-    const v = screenStream.getVideoTracks()[0];
-    if (v) pc.addTrack(v, screenStream);
-    const a = screenStream.getAudioTracks()[0];
-    if (a) pc.addTrack(a, screenStream);
+    const v = screenStream.getVideoTracks()[0]; if (v) pc.addTrack(v, screenStream);
+    const a = screenStream.getAudioTracks()[0]; if (a) pc.addTrack(a, screenStream);
   }
 
   pc.onicecandidate = (e) => {
-    if (e.candidate && peerId && socket && socket.connected) {
-      socket.emit('rtc-signal', roomCode, peerId, { type: 'candidate', candidate: e.candidate });
-    }
+    if (e.candidate && peerId) pushSignal(peerId, 'candidate', { candidate: e.candidate });
   };
 
   pc.ontrack = (e) => {
@@ -252,11 +309,11 @@ function ensurePC() {
   };
 
   pc.onnegotiationneeded = async () => {
-    if (!peerId || !socket || !socket.connected) return;
+    if (!peerId) return;
     try {
       makingOffer = true;
       await pc.setLocalDescription(await pc.createOffer());
-      socket.emit('rtc-signal', roomCode, peerId, { type: 'offer', sdp: pc.localDescription });
+      pushSignal(peerId, 'offer', { sdp: pc.localDescription });
     } catch (err) { console.warn('offer error', err); }
     finally { makingOffer = false; }
   };
@@ -265,6 +322,7 @@ function ensurePC() {
 }
 
 async function handleSignal(fromId, msg) {
+  if (!peerId) peerId = fromId;
   if (!pc) ensurePC();
   try {
     if (msg.type === 'offer') {
@@ -272,7 +330,7 @@ async function handleSignal(fromId, msg) {
       if (collision && isHost) return;
       await pc.setRemoteDescription(msg.sdp);
       await pc.setLocalDescription(await pc.createAnswer());
-      socket.emit('rtc-signal', roomCode, fromId, { type: 'answer', sdp: pc.localDescription });
+      pushSignal(fromId, 'answer', { sdp: pc.localDescription });
     } else if (msg.type === 'answer') {
       await pc.setRemoteDescription(msg.sdp);
     } else if (msg.type === 'candidate') {
@@ -287,7 +345,6 @@ function onPeerArrived() {
   banner('Напарник подключился', 'good');
   sendState();
 }
-
 function onPeerLeft() {
   peerId = null;
   if (pc) { pc.close(); pc = null; }
@@ -309,20 +366,16 @@ function onPeerLeft() {
   }
 }
 
+// ---------- Демонстрация экрана ----------
 el.btnShare.addEventListener('click', async () => {
   if (screenStream) return stopScreenShare(false);
   try {
     el.btnShare.disabled = true;
     screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        displaySurface: 'monitor',
-        frameRate: { ideal: 60, max: 60 },
-        width: { ideal: 1920 }, height: { ideal: 1080 }
-      },
+      video: { displaySurface: 'monitor', frameRate: { ideal: 60, max: 60 },
+               width: { ideal: 1920 }, height: { ideal: 1080 } },
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: 48000 },
-      systemAudio: 'include',
-      selfBrowserSurface: 'exclude',
-      preferCurrentTab: false
+      systemAudio: 'include', selfBrowserSurface: 'exclude', preferCurrentTab: false
     });
     el.btnShare.disabled = false;
 
@@ -354,16 +407,10 @@ el.btnShare.addEventListener('click', async () => {
     if (err && err.name !== 'NotAllowedError') toast('Не удалось начать демонстрацию');
   }
 });
-
 function stopScreenShare(silent) {
-  if (screenStream) {
-    screenStream.getTracks().forEach((t) => t.stop());
-    screenStream = null;
-  }
+  if (screenStream) { screenStream.getTracks().forEach((t) => t.stop()); screenStream = null; }
   if (pc && screenTracks.length) {
-    pc.getSenders().forEach((s) => {
-      if (s.track && screenTracks.includes(s.track)) pc.removeTrack(s);
-    });
+    pc.getSenders().forEach((s) => { if (s.track && screenTracks.includes(s.track)) pc.removeTrack(s); });
   }
   screenTracks = [];
   el.localVideo.srcObject = null;
@@ -375,6 +422,7 @@ function stopScreenShare(silent) {
   if (!silent) toast('Демонстрация остановлена');
 }
 
+// ---------- Качество ----------
 async function applyQuality() {
   if (!pc) return;
   const preset = QUALITY[el.qualitySelect.value] || QUALITY.high;
@@ -393,6 +441,7 @@ el.qualitySelect.addEventListener('change', () => {
   if (p) toast('Качество: ' + p.label);
 });
 
+// ---------- Микрофон и статусы ----------
 el.btnMic.addEventListener('click', () => {
   if (!micStream) return;
   const track = micStream.getAudioTracks()[0];
@@ -403,23 +452,18 @@ el.btnMic.addEventListener('click', () => {
   el.capMic.textContent = track.enabled ? 'микрофон' : 'выкл';
   sendState();
 });
-
 function sendState() {
-  if (!socket || !socket.connected || !roomCode) return;
-  const micTrack = micStream ? micStream.getAudioTracks()[0] : null;
-  socket.emit('state-update', roomCode, {
-    mic: micTrack ? micTrack.enabled : true,
-    sharing: !!screenStream
-  });
+  if (!myMemberRef) return;
+  const t = micStream ? micStream.getAudioTracks()[0] : null;
+  myMemberRef.update({ mic: t ? t.enabled : true, sharing: !!screenStream });
 }
-
 function applyPeerState(state) {
-  el.peerName.textContent = state.mic === false ? 'Напарник (микрофон выкл)' : 'Напарник';
+  el.peerName.textContent = (state && state.mic === false) ? 'Напарник (микрофон выкл)' : 'Напарник';
 }
 
 el.btnCopyCallLink.addEventListener('click', () => copyText(roomLink(), 'Ссылка на комнату скопирована'));
 el.btnLeave.addEventListener('click', leaveAll);
-window.addEventListener('beforeunload', () => { if (pc) pc.close(); });
+window.addEventListener('beforeunload', () => { if (myMemberRef) myMemberRef.remove(); if (pc) pc.close(); });
 
 function leaveAll() {
   stopScreenShare(true);
@@ -427,6 +471,11 @@ function leaveAll() {
   if (pc) { pc.close(); pc = null; }
   if (statsTimer) { clearInterval(statsTimer); statsTimer = null; }
   stopMeters();
+  if (membersRef) membersRef.off();
+  if (signalsRef) signalsRef.off();
+  if (myMemberRef) { myMemberRef.remove(); myMemberRef = null; }
+  if (isHost && roomCode) db.ref('rooms/' + roomCode).remove();   // хост убирает комнату целиком
+  membersRef = null; signalsRef = null;
   remoteMix = new MediaStream();
   el.remoteVideo.srcObject = null;
   el.remoteAudio.srcObject = null;
@@ -440,18 +489,16 @@ function leaveAll() {
   el.stageBadge.hidden = true;
   el.eventBanner.hidden = true;
   resetStatsUI();
-  roomCode = null; peerId = null; isHost = false; prevVideo = null;
-  if (socket) socket.disconnect();
+  roomCode = null; peerId = null; isHost = false; myId = null; prevVideo = null;
   showScreen('lobby');
 }
 
+// ---------- Телеметрия ----------
 function startStats() {
   if (statsTimer) clearInterval(statsTimer);
-  prevVideo = null;
-  resetStatsUI();
+  prevVideo = null; resetStatsUI();
   statsTimer = setInterval(collectStats, 1000);
 }
-
 async function collectStats() {
   if (!pc) return;
   let video = null, remote = null;
@@ -474,9 +521,7 @@ async function collectStats() {
       setBar(el.barBitrate, (bps / 12000000) * 100);
     }
     prevVideo = { t: now, bytes: video.bytesSent };
-    if (video.frameWidth && video.frameHeight) {
-      el.statRes.textContent = video.frameWidth + 'x' + video.frameHeight;
-    }
+    if (video.frameWidth && video.frameHeight) el.statRes.textContent = video.frameWidth + 'x' + video.frameHeight;
     const fps = video.framesPerSecond || 0;
     el.statFps.textContent = fps ? String(Math.round(fps)) : '—';
     setBar(el.barFps, (fps / 60) * 100, fps > 0 && fps < 24, fps > 0 && fps < 12);
@@ -485,6 +530,7 @@ async function collectStats() {
     if (remote.roundTripTime != null) {
       const ms = Math.round(remote.roundTripTime * 1000);
       el.statRtt.textContent = ms + ' мс';
+      el.pingValue.textContent = ms + ' мс';
       setBar(el.barRtt, (ms / 300) * 100, ms > 80, ms > 150);
     }
     if (remote.jitter != null) el.statJitter.textContent = (remote.jitter * 1000).toFixed(1) + ' мс';
@@ -495,60 +541,44 @@ async function collectStats() {
     }
   }
 }
-
 function setBar(bar, pct, warn, bad) {
   bar.style.width = Math.max(2, Math.min(100, pct)) + '%';
   bar.className = bad ? 'bad' : (warn ? 'warn' : '');
 }
-
 function fmtBitrate(bps) {
   if (bps >= 1000000) return (bps / 1000000).toFixed(1) + ' Мбит/с';
   return Math.round(bps / 1000) + ' Кбит/с';
 }
-
 function resetStatsUI() {
   el.statRes.textContent = '—'; el.statFps.textContent = '—';
   el.statBitrate.textContent = '—'; el.statRtt.textContent = '—';
   el.statJitter.textContent = '—'; el.statLoss.textContent = '—';
+  el.pingValue.textContent = '—';
   [el.barFps, el.barBitrate, el.barRtt, el.barLoss].forEach((b) => { b.style.width = '0%'; b.className = ''; });
 }
 
+// ---------- Индикаторы громкости ----------
 function ensureAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
   return audioCtx;
 }
-
 function makeAnalyser(stream) {
   const ctx = ensureAudioCtx();
   const src = ctx.createMediaStreamSource(stream);
-  const an = ctx.createAnalyser();
-  an.fftSize = 512;
-  src.connect(an);
+  const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
   return an;
 }
-
-function startLocalMeter(stream) {
-  try { localAnalyser = makeAnalyser(stream); } catch { localAnalyser = null; }
-  runMeters();
-}
-function startRemoteMeter(stream) {
-  try { remoteAnalyser = makeAnalyser(stream); } catch { remoteAnalyser = null; }
-  runMeters();
-}
-
+function startLocalMeter(stream) { try { localAnalyser = makeAnalyser(stream); } catch { localAnalyser = null; } runMeters(); }
+function startRemoteMeter(stream) { try { remoteAnalyser = makeAnalyser(stream); } catch { remoteAnalyser = null; } runMeters(); }
 function meterLevel(an) {
   if (!an) return 0;
   if (!meterBuf || meterBuf.length !== an.frequencyBinCount) meterBuf = new Uint8Array(an.frequencyBinCount);
   an.getByteTimeDomainData(meterBuf);
   let sum = 0;
-  for (let i = 0; i < meterBuf.length; i++) {
-    const v = (meterBuf[i] - 128) / 128;
-    sum += v * v;
-  }
+  for (let i = 0; i < meterBuf.length; i++) { const v = (meterBuf[i] - 128) / 128; sum += v * v; }
   return Math.min(100, Math.sqrt(sum / meterBuf.length) * 300);
 }
-
 function runMeters() {
   if (metersRAF) return;
   const loop = () => {
@@ -558,19 +588,17 @@ function runMeters() {
   };
   loop();
 }
-
 function stopMeters() {
   if (metersRAF) cancelAnimationFrame(metersRAF);
-  metersRAF = null;
-  localAnalyser = null; remoteAnalyser = null;
-  el.meterLocal.style.width = '0%';
-  el.meterRemote.style.width = '0%';
+  metersRAF = null; localAnalyser = null; remoteAnalyser = null;
+  el.meterLocal.style.width = '0%'; el.meterRemote.style.width = '0%';
 }
 
+// ---------- Запуск ----------
 (function init() {
   const supported = navigator.mediaDevices && window.RTCPeerConnection && navigator.mediaDevices.getDisplayMedia;
   if (!supported) { el.unsupported.hidden = false; return; }
-  initSocket();
+  watchConnection();
   const urlRoom = new URLSearchParams(location.search).get('room');
   if (urlRoom) {
     el.joinCode.value = urlRoom.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
